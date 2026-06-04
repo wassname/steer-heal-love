@@ -59,8 +59,14 @@ def _flatten_v(v) -> torch.Tensor:
     return torch.cat([v.state[li]["v"].flatten().float() for li in sorted(v.state)])
 
 
-def _mean_finite(xs) -> float:
+def _mean_finite(xs, label: str = "ppl") -> float:
+    """Mean over finite values, LOUDLY reporting dropped inf/nan -- those are the
+    broken-completion signal (empty/degenerate gens give inf ppl), so silently
+    averaging over survivors would make a broken adapter look healthier (review M3)."""
+    n = len(xs)
     xs = [x for x in xs if x == x and x != float("inf")]
+    if len(xs) < n:
+        logger.warning(f"_mean_finite[{label}]: dropped {n - len(xs)}/{n} non-finite (broken gens)")
     return sum(xs) / len(xs) if xs else float("nan")
 
 
@@ -95,8 +101,8 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         with baked(model, hist_specs):
             m = evaluate_model(model, tok, cfg)
             adapter = generate_plain(model, tok, cfg, n=min(6, cfg.n_prompts))
-        adapter_ppl = _mean_finite([ppl_under_base(model, tok, a["prompt"], a["completion"]) for a in adapter])
-        steered_ppl = _mean_finite([s["ppl"] for s in scored])
+        adapter_ppl = _mean_finite([ppl_under_base(model, tok, a["prompt"], a["completion"]) for a in adapter], "adapter_ppl")
+        steered_ppl = _mean_finite([s["ppl"] for s in scored], "steered_ppl")
         logger.info(
             "SHOULD (Q1 heal): adapter_ppl < steered_ppl means the trained model expresses the trait "
             "COHERENTLY (healed) where raw steering was incoherent. If adapter_ppl >= steered_ppl, "
@@ -158,22 +164,27 @@ def _log_loop_summary(rounds: list[dict], base_m: dict) -> None:
     # meaningful when the trait actually moved, so gate on |dAuth| first.
     last = rounds[-1]
     dAuth = last["auth_nats"] - base_m["auth_nats"]
+    dCare = last["care_nats"] - base_m["care_nats"]
     dCoh = last["coherence"] - base_m["coherence"]
     coh_cost = abs(dCoh) / abs(dAuth) if abs(dAuth) > 1e-6 else float("nan")
+    surgical = abs(dAuth) > abs(dCare)  # Authority must move MORE than the off-target Care
     # TODO(threshold): coh_cost cut not yet calibrated. Provisional: a healed adapter
-    # SHOULD land trait (dAuth <= -0.3 nats) at coh_cost <= 0.05 (steered c=0.5 ~0.003).
+    # SHOULD land trait (dAuth <= -0.3 nats), SURGICALLY (|dAuth|>|dCare|, else it is
+    # broad permissivizing not the trait -- review M4), at coh_cost <= 0.05 (steered c=0.5 ~0.003).
     if dAuth > -0.3:
         cue = "🔴"  # no trait retained (undo)
+    elif not surgical:
+        cue = "🔴"  # moved, but Care moved as much -> broad permissivizing, not the trait
     elif coh_cost <= 0.05:
-        cue = "🟢"  # trait retained cheaply
+        cue = "🟢"  # surgical trait retained cheaply
     else:
-        cue = "🟡"  # trait retained but coherence-expensive
+        cue = "🟡"  # surgical trait but coherence-expensive
     logger.info(
         f"main metric: {cue} coh_cost={coh_cost:.3f} (|dCoh|/|dAuth| vs base, lower=better) | "
-        f"dAuth={dAuth:+.2f} nats (trait, want <0) coherence={last['coherence']:.2f} "
+        f"dAuth={dAuth:+.2f} dCare={dCare:+.2f} (surgical={surgical}) coherence={last['coherence']:.2f} "
         f"(base {base_m['coherence']:.2f})\n"
-        "  cue: 🔴 dAuth>-0.3 (no trait) | 🟢 trait at coh_cost<=0.05 | 🟡 trait but expensive. "
-        "TODO calibrate coh_cost threshold (steered c=0.5 ref ~0.003)."
+        "  cue: 🔴 dAuth>-0.3 (no trait) OR |dAuth|<=|dCare| (broad, not surgical) | 🟢 surgical trait "
+        "at coh_cost<=0.05 | 🟡 surgical but expensive. TODO calibrate coh_cost (steered c=0.5 ref ~0.003)."
     )
 
 

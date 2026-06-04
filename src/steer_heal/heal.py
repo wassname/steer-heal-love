@@ -24,7 +24,16 @@ def _kl_per_pos(logp_a, logp_b):  # KL(a || b) summed over vocab, per position
 
 def _encode(tok, prompt: str, completion: str, max_len: int, device):
     ids = tok(prompt + completion, return_tensors="pt", truncation=True, max_length=max_len).to(device)
-    n_prompt = tok(prompt, return_tensors="pt").input_ids.shape[1]
+    prompt_ids = tok(prompt, return_tensors="pt").input_ids[0].to(device)
+    n_prompt = prompt_ids.shape[0]
+    # Assert the prompt tokenizes as a clean PREFIX of prompt+completion. If a BPE merge
+    # spans the boundary, n_prompt is wrong and the SFT mask silently shifts by a token
+    # (review M6). Truncation can drop the tail, so only check when not truncated.
+    if ids.input_ids.shape[1] >= n_prompt and ids.input_ids.shape[1] < max_len:
+        assert torch.equal(ids.input_ids[0, :n_prompt], prompt_ids), (
+            "prompt is not a token-prefix of prompt+completion (BPE boundary merge); "
+            "the SFT loss mask would be misaligned by a token."
+        )
     L = ids.input_ids.shape[1]
     tgt_is_completion = torch.arange(1, L, device=device) >= n_prompt  # mask over next-token targets
     return ids, tgt_is_completion
@@ -44,8 +53,9 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
     # streaming training table (token-efficient-logging): one row, columns self-decode below.
     logger.info(f"heal[{cfg.reg}] {len(kept)} completions x {cfg.epochs} ep = {n_steps} steps; "
                 f"lora r={cfg.lora_r} on layers {cfg.layer_range}")
-    logger.info("SHOULD: nll (SFT) falls as the adapter learns the trait; kl (barrier div) is 0 for "
-                "reg=nll/wd and >0 for kl_rev/kl_fwd; gnorm finite (not exploding). loss = nll + lam*relu(kl-tau).")
+    logger.info(f"SHOULD: nll (SFT) falls as the adapter learns the trait; kl (barrier div) is 0 for "
+                f"reg=nll/wd and >0 for kl_rev/kl_fwd; gnorm finite (not exploding). loss = nll + lam*relu(kl-tau). "
+                f"If kl stays < tau={cfg.tau} the barrier NEVER fired and {cfg.reg} == nll (no regularisation).")
     logger.info("  step   nll↓    kl  loss↓  gnorm")
     pbar = tqdm(total=n_steps, desc=f"heal[{cfg.reg}]", mininterval=120, maxinterval=120)
     step = 0
