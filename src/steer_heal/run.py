@@ -50,7 +50,8 @@ def load_model(model_id: str, dtype: torch.dtype):
         attn_implementation=attn,
     )
     model.eval()
-    logger.info(f"loaded {model_id} (dtype={dtype}, attn={attn}, layers={model.config.num_hidden_layers})")
+    n_layers = model.config.get_text_config().num_hidden_layers
+    logger.info(f"loaded {model_id} (dtype={dtype}, attn={attn}, layers={n_layers})")
     return model, tok
 
 

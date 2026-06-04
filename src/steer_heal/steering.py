@@ -9,7 +9,7 @@ from steer_heal.prompts import POOL, chat_prompt
 
 
 def _layer_band(model, layer_range: tuple[float, float]) -> tuple[int, ...]:
-    n = model.config.num_hidden_layers
+    n = model.config.get_text_config().num_hidden_layers  # nested for multimodal (gemma-3-4b)
     lo, hi = layer_range
     return tuple(range(int(lo * n), max(int(hi * n), int(lo * n) + 1)))
 
