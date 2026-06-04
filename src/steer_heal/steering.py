@@ -26,7 +26,10 @@ def teacher_vec(model, tok, cfg: RunConfig):
     logger.debug(f"--- POS[0] (trait) ---\n{pos[0]}\n--- NEG[0] (neutral) ---\n{neg[0]}")
 
     v = sl.Vector.train(model, tok, pos, neg, cfg=sl.MeanDiffC(layers=layers, normalize=True))
-    v.calibrate(model, tok, target_kl=cfg.target_kl)
+    # Wide bracket: the vector is unit-normalised, so reaching ~1 nat p95 KL on a
+    # real model needs c ~ O(100) (KL ~ c^2). steering-lite's default hi (~16) is
+    # too low and pins c_star at the bracket top. See RESEARCH_JOURNAL 2026-06-04.
+    v.calibrate(model, tok, target_kl=cfg.target_kl, bracket=(0.1, 1024.0))
     logger.info(f"teacher_vec: layers={layers} c_star={v.cfg.coeff:+.4f} (target_kl={cfg.target_kl})")
     return v
 

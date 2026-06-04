@@ -63,7 +63,7 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
             loss.backward()
             opt.step()
             opt.zero_grad()
-        logger.info(f"heal[{cfg.reg}] epoch {ep}: sft={sft.item():.3f} div={float(div):.3f}")
+        logger.info(f"heal[{cfg.reg}] epoch {ep}: sft={sft.item():.3f} div={div.detach().item():.3f}")
 
     spec = AdapterSpec.from_lora(lora, default_c=1.0)  # CPU-resident, for the next round's history
     return lora, spec
