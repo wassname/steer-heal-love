@@ -1,0 +1,51 @@
+title: NeruIPS 2023 Template
+author: Shao-Ting Chiu
+version: 0.1.0
+contributes:
+  formats:
+    pdf:
+      # define default configuration for the pdf version of your format
+      documentclass: article
+      papersize: letter
+      cite-method: natbib
+      number-sections: true
+      pdf-engine: pdflatex
+      toc: false
+      # Set this below (`biblio-config: false`) if your cls already load a bst file
+      # biblio-config: false
+      # Content to add in header that your format is using
+      header-includes: |
+        \usepackage[nonatbib, preprint]{neurips_2023}
+        \usepackage{algorithm}
+        \usepackage{algpseudocode}
+        \usepackage{amsmath}
+        \usepackage{amsthm}
+        \usepackage[utf8]{inputenc} % allow utf-8 input
+        \usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+        \usepackage{hyperref}       % hyperlinks
+        \usepackage{url}            % simple URL typesetting
+        \usepackage{booktabs}       % professional-quality tables
+        \usepackage{amsfonts}       % blackboard math symbols
+        \usepackage{nicefrac}       % compact symbols for 1/2, etc.
+        \usepackage{microtype}      % microtypography
+        \usepackage{xcolor}         % colors
+        \usepackage{comment}
+        \usepackage{graphicx} 
+        \bibliographystyle{abbrvnat}
+        \newtheorem{lemma}{Lemma}
+      template-partials:
+        # Add here the partials your format is using
+        - "partials/graphics.tex"
+        - "partials/before-body.tex"
+        - "partials/title.tex"
+        - "partials/_authors.tex"
+      format-resources:
+        # Add here the resources required for the PDF rendering
+        - neurips_2023.sty
+    html:
+      # define default configuration for the html version of your format
+      number-sections: true
+      toc: true
+      source: true
+      # Use a CSL file to style (https://www.zotero.org/styles/)
+      csl: https://www.zotero.org/styles/ieee

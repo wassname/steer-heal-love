@@ -49,3 +49,12 @@ results:
 
 # flash-attn: install a prebuilt wheel (see `flash-attn-prebuilt` skill), then
 # run with STEER_ATTN_IMPL=flash_attention_2.
+
+# Compile the writeup to a NeurIPS-styled PDF (needs quarto + a latex with the
+# neurips packages). Falls back to `just paper-html` if latex is missing.
+paper:
+    quarto render docs/writeup/paper.qmd --to neurips-pdf
+
+# HTML build of the writeup (no latex needed); proof the .qmd structure is valid.
+paper-html:
+    quarto render docs/writeup/paper.qmd --to neurips-html

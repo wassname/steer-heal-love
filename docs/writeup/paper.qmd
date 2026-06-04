@@ -1,0 +1,132 @@
+---
+title: "Steer then heal: distilling an activation steering vector into LoRA weights without the incoherence"
+format:
+  neurips-pdf:
+    keep-tex: true
+  neurips-html: default
+author:
+  - name: wassname
+    email: claude@wassname.org
+abstract: |
+  <!-- TODO: abstract. Draft once U2/U3 gates resolve. Structure (Heilmeier + Nature summary):
+  (1) field: activation steering moves a trait at inference but leaks incoherence;
+  (2) problem: distilling the steered teacher into weights bakes the incoherence in too;
+  (3) what we do: distil the vector into a LoRA and heal the leaked incoherence with a
+  KL-to-base barrier, looped over rounds, anchored to the round-0 original;
+  (4) headline metric: coh_cost = |dCoh|/|dAuth|, coherence cost per nat of trait;
+  (5) finding so far (provisional): in the coherent steering regime the trait is near-free
+  (coherence pins ~1.0), and the round-0-anchored barrier STALLS the loop. Numbers TODO. -->
+keywords: [activation steering, steering vectors, LoRA, knowledge distillation, coherence, moral foundations]
+reference-section-title: References
+bibliography: references.bib
+---
+
+## Introduction {#sec-intro}
+
+Activation steering moves a model toward a trait by adding a direction to its
+residual stream at inference time [@turner2023activation; @panickssery2023caa; @zou2023representation].
+The catch is that the same push that shifts the trait also degrades coherence,
+and the effect lives only as long as the hook is attached. @blank2026subliminal
+show that training a student on a steered teacher's completions distils that
+direction into the weights. We ask the follow-up question they leave open: when
+you bake the vector in, you also bake in the incoherence it leaks, so can a
+regulariser anchored to the original model heal that incoherence while keeping
+the trait?
+
+The trait here is "do not defer to authority", operationalised as care over
+authority on the tinymfv moral-foundations forced-choice eval (the Authority and
+Care/Harm foundations of @graham2009liberals; @graham2013mft). We report the
+coherence cost per nat of trait, $\text{coh\_cost} = |\Delta\text{Coh}| / |\Delta\text{Auth}|$.
+
+<!-- TODO: contributions list (paper-writing: end intro with bullet contributions).
+Draft once results land. Candidate claims, all provisional:
+  - in the COHERENT steering regime the trait is near-free (coherence pinned ~1.0);
+  - the round-0-anchored barrier STALLS the loop (heal walks the trait back toward base);
+  - which regulariser (nll / kl_fwd / kl_rev / wd) wins, if any. -->
+
+## Related work {#sec-related}
+
+We build directly on @blank2026subliminal: same steering-vector-distillation
+backbone, but we add an explicit coherence regulariser, measure coherence with
+tinymfv, and iterate over rounds. @turner2023activation and @panickssery2023caa
+extract and apply steering vectors but do not distil them into weights.
+@fierro2025weight also edit weights toward a trait, but they take the direction
+from the difference of two fine-tuned adapters rather than from an activation
+steering vector, and they neither measure nor heal coherence. The healing
+adapter is LoRA [@hu2021lora]; the gated-history accumulator that folds finished
+rounds while keeping the base pristine is in the PiSSA / steering-lite lineage
+[@meng2024pissa].
+
+<!-- TODO: one paragraph sharpening "how we differ" per cited work (see spec.md). -->
+
+## Method {#sec-method}
+
+The pipeline is steer, distil, heal, loop, anchored to the round-0 original
+throughout.
+
+*Steer.* The teacher vector is the mean residual-stream shift from a trait
+system prompt to a neutral one, read at the assistant tag over a set of diverse
+contexts, following @blank2026subliminal. We dose it by sweeping the coefficient
+over a small set of scales and keeping the completions that pass a coherence and
+trait filter, rather than calibrating a single coefficient.
+
+*Distil and heal.* We generate steered completions, filter the incoherent and
+trait-narrating ones, then train a LoRA on the survivors. One objective, one
+constraint: SFT cross-entropy plus a barrier $\lambda \cdot \text{relu}(D - \tau)$
+that switches off while the divergence $D$ to the original model is already
+within the coherence region. $D$ is the variable under test: `nll` (no barrier),
+`kl_fwd`, `kl_rev`, and adapter-only weight decay `wd`.
+
+*Loop.* Each finished round folds into a frozen accumulator with its own gate,
+so the base stays recoverable (gates off) as the KL reference and base eval,
+while only the current round trains.
+
+<!-- TODO: barrier figure or the BakedLoRA forward as a numbered equation; pseudopy block (see spec.md). -->
+
+## Experimental setup {#sec-setup}
+
+<!-- TODO: model (gemma-3-4b-it / Qwen3-4B), seeds, prompt set D, layer band,
+n kept completions, epochs, LoRA rank, alpha sweep set, barrier tau/lambda.
+Fill from config.py defaults at write time. -->
+
+The headline trait metric is `auth_nats`, the log of tinymfv's marginal blame
+mass on Authority (lower means more of the trait). Coherence is the tinymfv
+`p_ans_any` answer mass. Surgicality is whether Authority moves while Care does
+not.
+
+## Results {#sec-results}
+
+<!-- TODO: results. Reference the figures the pipeline already emits:
+  out/{ts}_{slug}/trajectory.png -- steer (red) -> heal (green) trait-coherence
+    pareto over rounds, plus the per-round auth_nats and coherence panels;
+  out/{ts}_{slug}/map.html -- the Care-vs-Authority interactive map, one node per round.
+Headline table: coh_cost per arm. Do NOT fill numbers until a clean run lands. -->
+
+::: {#fig-trajectory}
+<!-- TODO: include out/{ts}_{slug}/trajectory.png once a representative run is chosen.
+![](trajectory.png) -->
+
+Steer (red) to heal (green) over rounds: trait (`auth_nats`, down is more trait)
+against coherence (held near 1.0), with the trait-coherence pareto map. *Placeholder.*
+:::
+
+## Discussion {#sec-discussion}
+
+<!-- TODO. Provisional read to develop once numbers land: in the coherent steering
+regime the trait is near-free (coherence pinned ~1.0 across steer and heal), so
+there is little incoherence left to heal. The round-0-anchored barrier then STALLS
+the loop: anchored to base, heal walks the trait back toward base rather than
+letting it accumulate across rounds. Whether kl_rev's mode-seeking suppression
+helps here is the open question. -->
+
+## Limitations {#sec-limitations}
+
+<!-- TODO. Candidates: single model and single trait; auth_nats is a marginal
+log-mass readout with a Jensen gap vs steering-lite's per-row delta-logit, so nat
+magnitudes are provisional; coherence canary is necessary but not sufficient;
+the round-0 anchor that resists drift is also what stalls accumulation. -->
+
+## Conclusion {#sec-conclusion}
+
+<!-- TODO. Write last. State what the steer-distil-heal-loop does and does not buy
+over plain SFT at matched coherence, in one or two sentences, no overclaim. -->

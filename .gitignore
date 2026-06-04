@@ -11,3 +11,6 @@ __pycache__/
 .env
 .venv/
 *.safetensors
+.claude/
+docs/writeup/paper.pdf
+docs/writeup/paper.tex
