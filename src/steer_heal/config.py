@@ -42,6 +42,10 @@ class RunConfig:
     epochs: int = 2
     lr: float = 1e-4
 
+    # ── eval (tinymfv) ──
+    eval_vignettes: int | None = None  # None = all Clifford-2015 vignettes
+    eval_think_tokens: int = 64  # tinymfv default; 10x faster than 256, within bf16 noise
+
     # ── loop (U3) ──
     n_rounds: int = 4
 
@@ -57,6 +61,10 @@ TINY = dict(
     epochs=1,
     n_rounds=1,
     alphas=(1.0,),
+    eval_vignettes=4,
+    eval_think_tokens=16,
+    ppl_tau=1e9,  # tiny-random produces junk ppl; relax the gate so the path still runs
+    rep_tau=1.1,
 )
 
 

@@ -32,7 +32,7 @@ def make_run_dir(ts: str, slug: str, cfg) -> Path:
 
 def log_event(run_dir: Path, **rec) -> None:
     # append one jsonl line; events.jsonl is the full machine-readable trace.
-    srsly.append_jsonl(run_dir / "events.jsonl", rec)
+    srsly.write_jsonl(run_dir / "events.jsonl", [rec], append=True)
 
 
 def append_result(cfg, metrics: dict) -> None:
