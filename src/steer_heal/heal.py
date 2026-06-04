@@ -46,7 +46,7 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
                 f"lora r={cfg.lora_r} on layers {cfg.layer_range}")
     logger.info("SHOULD: nll (SFT) falls as the adapter learns the trait; kl (barrier div) is 0 for "
                 "reg=nll/wd and >0 for kl_rev/kl_fwd; gnorm finite (not exploding). loss = nll + lam*relu(kl-tau).")
-    logger.info("  step    nll↓     kl    loss↓   gnorm")
+    logger.info("  step   nll↓    kl  loss↓  gnorm")
     pbar = tqdm(total=n_steps, desc=f"heal[{cfg.reg}]", mininterval=120, maxinterval=120)
     step = 0
     for ep in range(cfg.epochs):
@@ -80,8 +80,8 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
             opt.step()
             opt.zero_grad()
             if step % max(1, n_steps // 20) == 0 or step == n_steps - 1:
-                logger.info(f"  {step:4d}  {sft.item():7.3f}  {div.detach().item():6.3f}  "
-                            f"{loss.item():7.3f}  {float(gnorm):6.2f}")
+                logger.info(f"  {step:4d}  {sft.item():5.2f}  {div.detach().item():4.2f}  "
+                            f"{loss.item():5.2f}  {float(gnorm):5.1f}")
             pbar.set_postfix(nll=f"{sft.item():.2f}", kl=f"{div.detach().item():.2f}", gn=f"{float(gnorm):.1f}")
             pbar.update(1)
             step += 1

@@ -4,13 +4,15 @@ TARGET    = Authority foundation, want DOWN (trait = "do not defer to authority"
             (also report SocialNorms + Care, the axis the 1b note flagged.)
 OFF-TARGET= coherence = tinymfv mean_pmass_allowed = p_any_ans, want HELD ~1.0.
 
-Stages: base -> steered (raw c=1) -> heal_nll -> heal_klrev. One model load,
-one vignette set, so every row is paired and comparable.
+Stages: base -> steered(c=0.5,1.0) -> one row per adapter ckpt (labeled by its
+reg). One model load, one vignette set, so every row is paired and comparable.
 
-Run: uv run python scripts/diag_stages.py <nll_ckpt> <klrev_ckpt> [n|all]
+Run: uv run python scripts/diag_stages.py <ckpt1> [ckpt2 ...] [n|all]
 """
 
+import json
 import sys
+from pathlib import Path
 
 import torch
 import tinymfv
@@ -23,8 +25,22 @@ from steer_heal.eval import foundation_nats  # noqa: E402
 from steer_heal.steering import teacher_vec  # noqa: E402
 from steer_heal.ws.bake import AdapterSpec, baked  # noqa: E402
 
-nll_ckpt, klrev_ckpt = sys.argv[1], sys.argv[2]
-N_VIG = None if (len(sys.argv) > 3 and sys.argv[3] == "all") else int(sys.argv[3]) if len(sys.argv) > 3 else None
+# Trailing "all"/int is the vignette count; everything else is a ckpt path.
+argv = sys.argv[1:]
+N_VIG = None
+if argv and (argv[-1] == "all" or argv[-1].isdigit()):
+    N_VIG = None if argv[-1] == "all" else int(argv[-1])
+    argv = argv[:-1]
+ckpts = argv  # 1+ adapter checkpoints
+
+
+def ckpt_label(path: str) -> str:
+    """Row label = the run's reg (kl_rev/nll/...) from metadata.json two dirs up."""
+    m = json.load(open(Path(path).parents[1] / "metadata.json"))
+    reg = m.get("cfg", m).get("reg", "?")
+    return f"heal_{reg}"
+
+
 cfg = RunConfig(n_prompts=12)
 
 tok = AutoTokenizer.from_pretrained(cfg.model)
@@ -45,18 +61,16 @@ def prof():
 
 
 v = teacher_vec(model, tok, cfg)
-nll = AdapterSpec.from_checkpoint(model, nll_ckpt)
-klrev = AdapterSpec.from_checkpoint(model, klrev_ckpt)
+adapters = [(ckpt_label(p), AdapterSpec.from_checkpoint(model, p)) for p in ckpts]
 
 rows = {}
 rows["base"] = prof()
 for c in (0.5, 1.0):  # 0.5 = coherent operating point; 1.0 = the collapse end
     with v(model, C=c * v.cfg.coeff):
         rows[f"steered(c={c:g})"] = prof()
-with baked(model, [nll]):
-    rows["heal_nll"] = prof()
-with baked(model, [klrev]):
-    rows["heal_klrev"] = prof()
+for label, spec in adapters:
+    with baked(model, [spec]):
+        rows[label] = prof()
 
 # target = Authority log p (down good, NATS), off-target = coherence (held good).
 # THE Gate-3 question (user): is the trained adapter more coherent PER UNIT behaviour

@@ -139,6 +139,19 @@ def _log_loop_summary(rounds: list[dict]) -> None:
     tbl = [{disp: r.get(key) for key, disp in cols} for r in rounds]
     logger.info("\nloop summary:\n" + tabulate(tbl, headers="keys", tablefmt="github", floatfmt=".3f") + "\n")
 
+    # BLUF: single headline with cue ball (token-efficient-logging). This run controls
+    # COHERENCE of the healed adapter (trait RETENTION vs base needs the paired
+    # diag_stages, since the loop never evals base/steered). Cue = coherence band.
+    last = rounds[-1]
+    coh = last["coherence"]
+    cue = "🟢" if coh >= 0.95 else "🟡" if coh >= 0.85 else "🔴"
+    logger.info(
+        f"main metric: {cue} coherence={coh:.2f} (healed if ~1.0) | auth_nats={last['auth_nats']:+.2f} "
+        f"care_nats={last['care_nats']:+.2f} adapter_ppl={last['adapter_ppl']:.1f}\n"
+        "  cue=coherence band (🟢>=.95 🟡>=.85 🔴<.85). For the trait verdict (auth_nats moved "
+        "vs base AND coh held) run scripts/diag_stages.py <ckpt> all -> retain, coh_cost."
+    )
+
 
 def main(cfg: RunConfig) -> None:
     setup_logging()

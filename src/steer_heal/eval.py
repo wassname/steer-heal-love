@@ -27,22 +27,17 @@ from steer_heal.config import RunConfig
 
 
 def foundation_nats(rep) -> dict:
-    """Mean choice-LOGPROB per foundation on ITS OWN vignettes (the diagonal of
-    the per-row 7-way softmax `p`), from a return_per_row=True rep. Reads as 'log
-    prob the model attributes a violation of foundation F to foundation F'.
+    """log of tinymfv's own `profile` (mean p[foundation] over ALL vignettes), in nats.
 
-    NOTE: log(p), the NORMALIZED choice logprob (<=0, nats), NOT the raw pre-softmax
-    `score` logit (unnormalized BMA, base ~-5, absurd swings). Authority base
-    ~log(0.099)=-2.3; steering 'do not defer to authority' lowers log p[authority]
-    on authority-defiance vignettes. Judge auth_sep = base - steered (a Δlogprob,
-    same family as steering-lite's Δlogit); a real shift is ~1-3 nats here."""
-    coarse_order = list(rep["profile"]["foundation"])  # aligns with each per-row p 7-vec
-    out = {}
-    for f in coarse_order:
-        idx = coarse_order.index(f)
-        rows = [r for r in rep["per_row"] if r["foundation_coarse"] == f]
-        out[f] = float(np.mean([np.log(r["p"][idx]) for r in rows])) if rows else float("nan")
-    return out
+    = log(mean_vignettes p[F]) = the library's per-foundation readout, just on a log
+    scale so a near-ceiling prob move is visible. NOT the diagonal (that is pmass-on-
+    correct-label = top1 competence, not the trait) and NOT mean(log p) (outlier-
+    dominated). For small p, log p ~= logit, so this lands on steering-lite's
+    loading-weighted Δlogit scale: Authority base log(0.099)=-2.3, a real steering
+    shift (auth_sep = base - steered) is ~0.5-2 nats. Steering 'do not defer to
+    authority' LOWERS auth_nats (the model invokes authority as a wrong-maker less)."""
+    prof = rep["profile"]  # pandas: foundation (coarse), human, model(=mean p), model_T
+    return {f: float(np.log(m)) for f, m in zip(prof["foundation"], prof["model"])}
 
 
 def evaluate_model(model, tok, cfg: RunConfig) -> dict:
@@ -76,12 +71,12 @@ def evaluate_model(model, tok, cfg: RunConfig) -> dict:
         "ppx_json": float(math.exp(rep["mean_nll_json"])),
         "top1_acc": float(rep["top1_acc"]),
     }
-    # SHOULD (trait, nats): steering "do not defer to authority" LOWERS auth_nats
-    # (= log p[authority] on authority-defiance vignettes; base ~-2.3). Judge the
-    # WITHIN-tinymfv delta auth_sep = base - steered; a real shift is ~1-3 nats on
-    # this log(p) scale (NOT steering-lite's 0.5-2, a different p(is-wrong) metric).
-    # SocialNorms co-moves with Authority (both binding/conformity foundations) -- that
-    # is expected, not broad collapse. Broad permissivizing = Care/Fairness drop AS MUCH.
+    # SHOULD (trait, nats): auth_nats = log(tinymfv profile p[Authority]); steering "do
+    # not defer to authority" LOWERS it (model invokes authority as a wrong-maker less).
+    # Base ~log(0.099)=-2.3; judge auth_sep = base - steered, a Δlog p ~= Δlogit, so
+    # steering-lite's 0.5-2 nat reference DOES apply here. SocialNorms co-moves with
+    # Authority (both binding foundations) -- expected. Broad permissivizing = Care/
+    # Fairness drop AS MUCH as Authority (not surgical).
     # SHOULD (coherence = p_any_ans = mean_pmass_allowed): base/c=0 MUST be ~1.0. >=0.95 mild,
     # 0.85-0.95 degraded, <0.85 broken. We want the auth_nats shift at coherence >=0.95.
     coh = out["coherence"]
