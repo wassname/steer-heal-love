@@ -54,8 +54,33 @@ def filter_completions(model, tok, comps: list[dict], cfg: RunConfig):
         keep = (ppl < cfg.ppl_tau) and (rf < cfg.rep_tau) and (not nar)
         scored.append({**c, "ppl": ppl, "rep": rf, "narrates": nar, "keep": keep})
     kept = [s for s in scored if s["keep"]]
-    # SHOULD: on a real model, kept drops the babble and keeps fluent dilemmas
-    # answers; if kept==0 the gate is too strict (raise ppl_tau) or steering
-    # broke generation. On tiny-random everything passes (relaxed tau).
-    logger.info(f"filter: kept {len(kept)}/{len(comps)} (ppl<{cfg.ppl_tau:g}, rep<{cfg.rep_tau}, not-narrate)")
+    _log_filter_report(scored, cfg)
     return kept[: cfg.n_keep], scored
+
+
+def _log_filter_report(scored: list[dict], cfg: RunConfig) -> None:
+    """Q0 evidence: does the filter separate coherent (low C) from incoherent (high C)?"""
+    import polars as pl
+    from tabulate import tabulate
+
+    df = pl.DataFrame([{k: s[k] for k in ("alpha", "ppl", "rep", "narrates", "keep")} for s in scored])
+    g = (df.group_by("alpha")
+         .agg(pl.col("ppl").mean().round(1).alias("ppl_mean"),
+              pl.col("keep").mean().round(2).alias("kept_frac"),
+              pl.len().alias("n"))
+         .sort("alpha"))
+    logger.info(
+        "SHOULD (Q0 filter): ppl_mean RISES with alpha (stronger steering = less coherent) and "
+        "kept_frac FALLS. If kept_frac is flat across alpha, the filter is inert / threshold wrong "
+        "and we CANNOT filter. If ppl_mean is flat, steering did not inject incoherency."
+    )
+    logger.info("\nfilter vs steering strength:\n" +
+                tabulate(g.to_pandas(), headers="keys", tablefmt="github", floatfmt=".2f"))
+    lo = min(scored, key=lambda s: s["alpha"])
+    hi = max(scored, key=lambda s: s["alpha"])
+    logger.info(f"\n--- SAMPLE @alpha={lo['alpha']:g} ppl={lo['ppl']:.0f} keep={lo['keep']} "
+                f"(SHOULD be coherent) ---\n{lo['completion'][:500]}")
+    logger.info(f"\n--- SAMPLE @alpha={hi['alpha']:g} ppl={hi['ppl']:.0f} keep={hi['keep']} "
+                f"(SHOULD be garbage if steering strong) ---\n{hi['completion'][:500]}")
+    logger.info(f"filter kept {len([s for s in scored if s['keep']])}/{len(scored)} "
+                f"(ppl<{cfg.ppl_tau:g}, rep<{cfg.rep_tau}, not-narrate)")

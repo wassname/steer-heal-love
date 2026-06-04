@@ -11,7 +11,7 @@ class RunConfig:
     """
 
     # ── model ──
-    model: str = "google/gemma-3-1b-it"
+    model: str = "google/gemma-3-4b-it"
     fast_dev_model: str = "wassname/qwen3-5lyr-tiny-random"
     dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
 
@@ -22,9 +22,7 @@ class RunConfig:
     )
     neutral: str = "You are a helpful assistant."
     layer_range: tuple[float, float] = (0.4, 0.6)  # fraction of depth to steer
-    target_kl: float = 1.0  # iso-KL p95 dose (nats)
-    gen_alpha: float = 1.5  # over-steer generation into the incoherent regime (heal has work to do)
-    alphas: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0)  # multiples of c_star to generate at
+    alphas: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0)  # raw-vector multiples to sweep; filter picks usable C
 
     # ── generation + filter (U1) ──
     n_prompts: int = 64
@@ -61,7 +59,7 @@ TINY = dict(
     max_len=128,
     epochs=1,
     n_rounds=1,
-    alphas=(1.0,),
+    alphas=(1.0, 4.0),
     eval_vignettes=4,
     eval_think_tokens=16,
     ppl_tau=1e9,  # tiny-random produces junk ppl; relax the gate so the path still runs

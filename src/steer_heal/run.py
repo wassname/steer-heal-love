@@ -17,11 +17,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from steer_heal.config import RunConfig, resolve
 from steer_heal.eval import evaluate_model
-from steer_heal.filter import filter_completions
+from steer_heal.filter import filter_completions, ppl_under_base
 from steer_heal.heal import heal_round
 from steer_heal.io import append_result, log_event, make_run_dir
 from steer_heal.plot import write_map
-from steer_heal.steering import generate_steered, teacher_vec
+from steer_heal.steering import generate_plain, generate_steered, teacher_vec
 from steer_heal.ws.bake import baked
 
 REPO = Path(__file__).resolve().parents[2]
@@ -58,17 +58,22 @@ def _flatten_v(v) -> torch.Tensor:
     return torch.cat([v.state[li]["v"].flatten().float() for li in sorted(v.state)])
 
 
+def _mean_finite(xs) -> float:
+    xs = [x for x in xs if x == x and x != float("inf")]
+    return sum(xs) / len(xs) if xs else float("nan")
+
+
 def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     hist_specs = []      # AdapterSpec per folded round (gated bake history)
     v0_flat = None       # round-0 direction, for the Q3 cosine
     rounds = []
     for rnd in range(cfg.n_rounds):
         logger.info(f"\n=== ROUND {rnd} [{cfg.model.split('/')[-1]} reg={cfg.reg}] ===")
-        # extract teacher vector + generate steered data from the CURRENT student
+        # extract teacher vector + sweep-generate steered data from the CURRENT student
         with baked(model, hist_specs):
             v = teacher_vec(model, tok, cfg)
-            comps = generate_steered(model, tok, v, alpha=cfg.gen_alpha, cfg=cfg)
-        # filter under the ORIGINAL (no history, no steering)
+            comps = generate_steered(model, tok, v, cfg)
+        # filter under the ORIGINAL (no history, no steering) -- this picks the usable C
         kept, scored = filter_completions(model, tok, comps, cfg)
         log_event(run_dir, stage="gen", round=rnd, n_comps=len(comps), n_kept=len(kept), scored=scored)
 
@@ -77,22 +82,46 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         lora.save(str(run_dir / "ckpt" / f"r{rnd}.safetensors"), extra_meta={"round": str(rnd), "reg": cfg.reg})
         hist_specs.append(spec)
 
-        # eval the student (all rounds baked)
+        # eval the student (all rounds baked) + Q1: trained-adapter output coherence
         with baked(model, hist_specs):
             m = evaluate_model(model, tok, cfg)
+            adapter = generate_plain(model, tok, cfg, n=min(6, cfg.n_prompts))
+        adapter_ppl = _mean_finite([ppl_under_base(model, tok, a["prompt"], a["completion"]) for a in adapter])
+        steered_ppl = _mean_finite([s["ppl"] for s in scored])
+        logger.info(
+            "SHOULD (Q1 heal): adapter_ppl < steered_ppl means the trained model expresses the trait "
+            "COHERENTLY (healed) where raw steering was incoherent. If adapter_ppl >= steered_ppl, "
+            f"healing failed. adapter_ppl={adapter_ppl:.0f} steered_ppl={steered_ppl:.0f}"
+        )
+        logger.info(f"--- ADAPTER SAMPLE r{rnd} (no steering, SHOULD show trait + be coherent) ---\n"
+                    f"{adapter[0]['completion'][:500]}")
 
         vf = _flatten_v(v)
         v0_flat = vf if v0_flat is None else v0_flat
         cos_v0 = float(cosine_similarity(vf, v0_flat, dim=0))
-        rec = {"round": rnd, **m, "cos_v0": cos_v0, "c_star": float(v.cfg.coeff), "n_kept": len(kept)}
+        rec = {"round": rnd, **m, "cos_v0": cos_v0, "steered_ppl": steered_ppl,
+               "adapter_ppl": adapter_ppl, "n_kept": len(kept)}
         rounds.append(rec)
         log_event(run_dir, stage="round", **rec)
         logger.info(f"round {rnd}: socialnorms={m['socialnorms']:.3f} care={m['care']:.3f} "
-                    f"coh={m['coherence']:.3f} cos_v0={cos_v0:+.2f}")
+                    f"coh={m['coherence']:.3f} cos_v0={cos_v0:+.2f} adapter_ppl={adapter_ppl:.0f}")
 
-    map_path = write_map(run_dir, rounds)
-    logger.info(f"map: {map_path}")
+    _log_loop_summary(rounds)
+    write_map(run_dir, rounds)
     return rounds[-1]
+
+
+def _log_loop_summary(rounds: list[dict]) -> None:
+    from tabulate import tabulate
+    logger.info(
+        "\nSHOULD (Q2 loop-coherent): coherence stays >= round-0 floor across rounds (heal holds it up). "
+        "If coherence falls each round, the loop accumulates incoherency faster than heal removes it.\n"
+        "SHOULD (Q3 direction): socialnorms FALLS / care RISES monotonically and cos_v0 stays > 0.5 "
+        "(same direction each round). If the trait reverses or cos_v0 drops, the direction wanders."
+    )
+    cols = ["round", "socialnorms", "care", "coherence", "cos_v0", "adapter_ppl", "n_kept"]
+    tbl = [{c: r.get(c) for c in cols} for r in rounds]
+    logger.info("\nloop summary:\n" + tabulate(tbl, headers="keys", tablefmt="github", floatfmt=".3f"))
 
 
 def main(cfg: RunConfig) -> None:

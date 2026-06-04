@@ -25,29 +25,45 @@ def teacher_vec(model, tok, cfg: RunConfig):
     # in the system prompt. ELSE the vector mixes in user-turn differences.
     logger.debug(f"--- POS[0] (trait) ---\n{pos[0]}\n--- NEG[0] (neutral) ---\n{neg[0]}")
 
-    v = sl.Vector.train(model, tok, pos, neg, cfg=sl.MeanDiffC(layers=layers, normalize=True))
-    # Wide bracket: the vector is unit-normalised, so reaching ~1 nat p95 KL on a
-    # real model needs c ~ O(100) (KL ~ c^2). steering-lite's default hi (~16) is
-    # too low and pins c_star at the bracket top. See RESEARCH_JOURNAL 2026-06-04.
-    v.calibrate(model, tok, target_kl=cfg.target_kl, bracket=(0.1, 1024.0))
-    logger.info(f"teacher_vec: layers={layers} c_star={v.cfg.coeff:+.4f} (target_kl={cfg.target_kl})")
+    # RAW (unnormalised) mean-diff = the residual-stream shift the trait system
+    # prompt induces (Subliminal Learning teacher vector). No iso-KL calibration:
+    # we steer at the natural scale (coeff = gen_alpha) and let the SFT/nll
+    # training + coherence filter self-calibrate the strength.
+    v = sl.Vector.train(model, tok, pos, neg, cfg=sl.MeanDiffC(layers=layers, normalize=False))
+    logger.info(f"teacher_vec: layers={layers} raw mean-diff (no calibration), coeff={v.cfg.coeff}")
     return v
 
 
 @torch.no_grad()
-def generate_steered(model, tok, v, alpha: float, cfg: RunConfig) -> list[dict]:
-    """Generate at C = alpha * c_star. Returns [{prompt, user, completion}]."""
+def _gen_one(model, tok, text, cfg):
+    ids = tok(text, return_tensors="pt").to(model.device)
+    gen = model.generate(**ids, max_new_tokens=cfg.gen_max_new_tokens, do_sample=True,
+                         temperature=1.0, top_p=0.95, pad_token_id=tok.pad_token_id)
+    return tok.decode(gen[0, ids.input_ids.shape[1]:], skip_special_tokens=True)
+
+
+def generate_steered(model, tok, v, cfg: RunConfig) -> list[dict]:
+    """Sweep cfg.alphas (raw-vector multiples); generate one completion per prompt x alpha.
+
+    The filter (Q0), not iso-KL, picks the usable C: low alpha is coherent, high
+    alpha collapses, and we keep the coherent-but-trait-laden ones.
+    """
     out = []
-    C = alpha * v.cfg.coeff
     for i in range(cfg.n_prompts):
         user = POOL[i % len(POOL)]
         text = chat_prompt(tok, cfg.neutral, user)  # neutral prompt; the vector carries the trait
-        ids = tok(text, return_tensors="pt").to(model.device)
-        with v(model, C=C):
-            gen = model.generate(**ids, max_new_tokens=cfg.gen_max_new_tokens,
-                                  do_sample=True, temperature=1.0, top_p=0.95,
-                                  pad_token_id=tok.pad_token_id)
-        completion = tok.decode(gen[0, ids.input_ids.shape[1]:], skip_special_tokens=True)
-        out.append({"user": user, "prompt": text, "completion": completion})
-    logger.debug(f"--- GEN[0] @C={C:+.3f} ---\nUSER: {out[0]['user']}\nCOMP: {out[0]['completion'][:400]}")
+        for alpha in cfg.alphas:
+            with v(model, C=alpha * v.cfg.coeff):
+                comp = _gen_one(model, tok, text, cfg)
+            out.append({"user": user, "prompt": text, "completion": comp, "alpha": float(alpha)})
+    return out
+
+
+def generate_plain(model, tok, cfg: RunConfig, n: int) -> list[dict]:
+    """Generate from the (baked) model with NO steering, for the Q1 heal comparison."""
+    out = []
+    for i in range(n):
+        user = POOL[i % len(POOL)]
+        text = chat_prompt(tok, cfg.neutral, user)
+        out.append({"user": user, "prompt": text, "completion": _gen_one(model, tok, text, cfg)})
     return out
