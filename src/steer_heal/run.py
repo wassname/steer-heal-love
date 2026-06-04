@@ -21,7 +21,7 @@ from steer_heal.filter import filter_completions, ppl_under_base
 from steer_heal.heal import heal_round
 from steer_heal.io import append_result, log_event, make_run_dir
 from steer_heal.plot import write_map
-from steer_heal.steering import generate_plain, generate_steered, teacher_vec
+from steer_heal.steering import generate_plain, generate_steered, gpu_mem, teacher_vec
 from steer_heal.ws.bake import baked
 
 REPO = Path(__file__).resolve().parents[2]
@@ -69,21 +69,24 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     v0_flat = None       # round-0 direction, for the Q3 cosine
     rounds = []
     for rnd in range(cfg.n_rounds):
-        logger.info(f"\n=== ROUND {rnd} [{cfg.model.split('/')[-1]} reg={cfg.reg}] ===")
+        logger.info(f"\n\n=== ROUND {rnd} [{cfg.model.split('/')[-1]} reg={cfg.reg}] gpu {gpu_mem()} ===")
         # extract teacher vector + sweep-generate steered data from the CURRENT student
         with baked(model, hist_specs):
             v = teacher_vec(model, tok, cfg)
             comps = generate_steered(model, tok, v, cfg)
         # filter under the ORIGINAL (no history, no steering) -- this picks the usable C
+        logger.info(f"\n=== FILTER [{len(comps)} completions] gpu {gpu_mem()} ===")
         kept, scored = filter_completions(model, tok, comps, cfg)
         log_event(run_dir, stage="gen", round=rnd, n_comps=len(comps), n_kept=len(kept), scored=scored)
 
         # heal one round on top of the baked history, then fold
+        logger.info(f"\n=== HEAL [{cfg.reg}] gpu {gpu_mem()} ===")
         lora, spec = heal_round(model, tok, kept, hist_specs, cfg)
         lora.save(str(run_dir / "ckpt" / f"r{rnd}.safetensors"), extra_meta={"round": str(rnd), "reg": cfg.reg})
         hist_specs.append(spec)
 
         # eval the student (all rounds baked) + Q1: trained-adapter output coherence
+        logger.info(f"\n=== EVAL [tinymfv classic] gpu {gpu_mem()} ===")
         with baked(model, hist_specs):
             m = evaluate_model(model, tok, cfg)
             adapter = generate_plain(model, tok, cfg, n=min(6, cfg.n_prompts))
@@ -105,8 +108,8 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
                "adapter_ppl": adapter_ppl, "n_kept": len(kept)}
         rounds.append(rec)
         log_event(run_dir, stage="round", **rec)
-        logger.info(f"round {rnd}: socialnorms={m['socialnorms']:.3f} care={m['care']:.3f} "
-                    f"coh={m['coherence']:.3f} cos_v0={cos_v0:+.2f} adapter_ppl={adapter_ppl:.0f}")
+        logger.info(f"round {rnd}: auth_nats↓={m['auth_nats']:+.2f} care_nats={m['care_nats']:+.2f} "
+                    f"coh→={m['coherence']:.3f} cos_v0={cos_v0:+.2f} adapter_ppl={adapter_ppl:.0f}")
 
     _log_loop_summary(rounds)
     write_map(run_dir, rounds)
@@ -115,15 +118,26 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
 
 def _log_loop_summary(rounds: list[dict]) -> None:
     from tabulate import tabulate
+    # (rec_key, display header with direction arrow) -- single source of truth.
+    cols = [("round", "round"), ("auth_nats", "auth_nats↓"), ("care_nats", "care_nats"),
+            ("coherence", "coherence→"), ("cos_v0", "cos_v0→"),
+            ("adapter_ppl", "adapter_ppl↓"), ("n_kept", "n_kept")]
+    logger.info(
+        "\nloop columns:\n"
+        "   auth_nats↓ = Authority logp on Authority vignettes, NATS (TARGET: down = less deference)\n"
+        "    care_nats = Care logp, NATS (off-target axis -- should move LESS than auth if surgical)\n"
+        "   coherence→ = p_any_ans = mean_pmass_allowed (OFF-TARGET: hold ~1.0)\n"
+        "      cos_v0→ = cosine of round vector vs round-0 vector (direction stability)\n"
+        " adapter_ppl↓ = ppl-under-original of the no-steering adapter generations"
+    )
     logger.info(
         "\nSHOULD (Q2 loop-coherent): coherence stays >= round-0 floor across rounds (heal holds it up). "
         "If coherence falls each round, the loop accumulates incoherency faster than heal removes it.\n"
-        "SHOULD (Q3 direction): socialnorms FALLS / care RISES monotonically and cos_v0 stays > 0.5 "
-        "(same direction each round). If the trait reverses or cos_v0 drops, the direction wanders."
+        "SHOULD (Q3 direction): auth_nats FALLS monotonically (0.5-2 nats is a real shift) and cos_v0 "
+        "stays > 0.5. If care_nats falls as much as auth_nats, it's broad permissivizing not surgical."
     )
-    cols = ["round", "socialnorms", "care", "coherence", "cos_v0", "adapter_ppl", "n_kept"]
-    tbl = [{c: r.get(c) for c in cols} for r in rounds]
-    logger.info("\nloop summary:\n" + tabulate(tbl, headers="keys", tablefmt="github", floatfmt=".3f"))
+    tbl = [{disp: r.get(key) for key, disp in cols} for r in rounds]
+    logger.info("\nloop summary:\n" + tabulate(tbl, headers="keys", tablefmt="github", floatfmt=".3f") + "\n")
 
 
 def main(cfg: RunConfig) -> None:

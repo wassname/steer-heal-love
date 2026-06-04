@@ -1,5 +1,7 @@
 outputs/
+out/
 results/
+results.tsv
 logs/
 wandb/
 data/

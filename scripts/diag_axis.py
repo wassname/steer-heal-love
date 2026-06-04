@@ -31,7 +31,7 @@ v = teacher_vec(model, tok, cfg)
 
 def profile(label):
     rep = tinymfv.evaluate(model, tok, name="classic", n_vignettes=24,
-                           conditions=("other_violate",), max_think_tokens=64, device=model.device)
+                           conditions=("other_violate",), max_think_tokens=cfg.eval_think_tokens, device=model.device)
     p = dict(zip(rep["profile"]["foundation"], rep["profile"]["model"]))
     p["_coherence"] = rep["mean_pmass_allowed"]
     print(f"\n=== {label} ===")

@@ -195,6 +195,40 @@ Per setup-repo, the single functional test is `just fast-dev-run`: the real pipe
 4. N kept completions (~50?), epochs (2?), LoRA rank.
 5. assistant-tag extraction: confirm steering-lite can read at that position or extend `extract.py`.
 
+## Plans / fallbacks if the trait won't distill (recorded 2026-06-04)
+
+Context: on gemma-3-4b-it, one round of distill+heal UNDOES the steering rather than healing it
+(journal 2026-06-04 (a)): the adapter reverts to base, dropping Authority along with the incoherence,
+because the coherence filter removed the trait-laden completions before training. Ordered fallbacks:
+
+- Plan A (current primary): make the steering in the TRAINING DATA strong enough to carry a large
+  trait shift while the healed model still sits at coherence ~0.95 (not the 0.80 collapse of c=1, not
+  the 0.99 no-op). Heal-vs-undo metric: `retain = dAuth(heal)/dAuth(steer)` and the ratio |dAuth|/|dCoh|;
+  a real heal has large |dAuth| at small |dCoh|, an undo has both ~0. Run heal with the coherence FILTER
+  OFF (ppl_tau large) so the kl_rev barrier, not the filter, removes incoherence during training.
+- Plan B (better extraction method / target): TWO sub-options.
+  - B1 (method): raw mean_diff is NOT the worst -- it is 4th/mid-pack in steering-lite (SI 32.8 vs
+    directional_ablation 52.9, sspace 45.7, super_sspace 47.7). If the proper persona pair + diverse
+    contexts is still broad, TODO try `super_sspace` or `sspace` (steering-lite variants/) -- more
+    surgical, and super_sspace is 4x faster than per-Linear sspace. Check bake-ability (Plan D).
+  - B2 (target): if Authority stays weak, target -Care or +Sanctity. Care has the widest steered range
+    on 4b (base 0.274 -> steered 0.056) so better SNR. Pick whichever the model steers most cleanly.
+  - Persona pair: use the PROVEN steering-lite pair (docs/personas/how_to_write_personas.md), NOT a
+    made-up "trait vs helpful-assistant" pair. Direct opposites, no negation, conflict framing:
+    pos="looks after others' wellbeing even when defying authority",
+    neg="defers to authority even when others' wellbeing suffers for it". (fixed 2026-06-04)
+- Plan C (eval reliability): the mean-mass forced-choice shift is noisy at max_think_tokens=64. Raise
+  tinymfv to 128 or 256 think tokens for the headline evals (should not be necessary, but the 64-token
+  profile is unreliable; document the cost). Also: foundation absolute values are NOT portable across
+  n_vignettes (base Care is 0.92 at the first 24 vignettes but 0.27 at all 132) -- always compare
+  base-vs-X paired at the SAME n, and prefer all 132.
+- Plan D (better extraction): raw mean-diff may be too blunt. Consider steering-lite alternatives
+  (cosine-gated steering, SVD/PiSSA-style directions) that give a cleaner trait axis. Constraint:
+  the method must be BAKEABLE into static weights (the loop folds each round into `baked()`). A
+  cosine GATE is input-dependent (its scale depends on the activation), so it cannot be folded into a
+  fixed weight delta -- if we use gating for extraction we still need a bakeable distillate. Check
+  which steering-lite methods are weight-foldable before adopting.
+
 ## UAT summary (proof, not assertion)
 
 - U1 filter gate: `results/u1_filter_gate.md` — labelled set, scorer separation. Link when done.

@@ -34,3 +34,44 @@
   ## Eval
   
   Plot the tinymfv progress over time on the auth vs care axis, with a subplot for a coherence measure. tinymfv gives a few: `p_ans_any` (best), `json_is_valid`, `ppx_json`.
+
+# 2026
+
+❯ /arj interesting that is potentially healed... although did it heal or just undo? the radio of
+dAuth vs coherence migth be the wa yto measure that
+
+weird that authority went backawards and that's it's a small effect overall? since coherence
+hardly went down (I would expect down to 0.95).
+
+so my new goal for you make the steering strong enougth to hard a bigger effect even if it's
+0.95 coherence
+--
+if we need to switch to -Care or +Tradition then we can if the model response better
+oh also mean mass shift kind of sucks? at least with small amount of thinking, so you might want
+to make tinymfv use 128 or 256 think tokens of the cdefualt 64 is unreliable. shouldn't be
+needed but plan C record it in spec
+
+oh perhaps there's a better steering, cosine gates or something, or the SVD (look at results in
+steering-lite and consider that some are much harder to bake, e.g. how to base cosine gating...
+you can't) so this is plan D record in spec
+
+---
+
+❯ so the first gate should now be
+  does steering actually change the target on the eval whilebeing coherent? if not you need to
+  iterate and think and fix
+
+  2nd gate can we filter? check qualitative samples on the borderline on the filter
+
+  3rd gate does the lora learn differen't and coherent examples
+
+  so have you actually got a steering vector the works
+
+❯ look if filter + lora works that great, we can ablate later. but the real uncertainty is
+  getting it working!
+  we might have too strong regularisaiton on the lora, what would you expect to see then?
+  what is the steering vector is to weak or to strong what would you expect to see there? what
+  if it was to imprecises and just a bad pareto trade, waht would you observe?
+  you should think about what you would observe at each gate in the likely possible outcomes
+  including subtle ones. then tell me if you measure it and if you see it
+  this includes eval results but also qualitative judgmeent from you

@@ -11,11 +11,25 @@ It is free to log almost everything to events.jsonl; do it.
 """
 
 import dataclasses
+import math
 import sys
 from pathlib import Path
 
 import srsly
 from loguru import logger
+
+
+def _json_safe(x):
+    """JSON cannot encode nan/inf. Map non-finite floats to None at the
+    serialization boundary (a foundation with zero eval vignettes -> nan logp;
+    real 132-vignette runs never hit this, tiny-dev 4-vignette runs do)."""
+    if isinstance(x, float) and not math.isfinite(x):
+        return None
+    if isinstance(x, dict):
+        return {k: _json_safe(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [_json_safe(v) for v in x]
+    return x
 
 REPO = Path(__file__).resolve().parents[2]
 RESULTS_TSV = REPO / "results.tsv"
@@ -32,7 +46,7 @@ def make_run_dir(ts: str, slug: str, cfg) -> Path:
 
 def log_event(run_dir: Path, **rec) -> None:
     # append one jsonl line; events.jsonl is the full machine-readable trace.
-    srsly.write_jsonl(run_dir / "events.jsonl", [rec], append=True)
+    srsly.write_jsonl(run_dir / "events.jsonl", [_json_safe(rec)], append=True)
 
 
 def append_result(cfg, metrics: dict) -> None:

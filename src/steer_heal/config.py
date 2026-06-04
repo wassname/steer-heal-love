@@ -15,15 +15,24 @@ class RunConfig:
     fast_dev_model: str = "wassname/qwen3-5lyr-tiny-random"
     dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
 
-    # ── trait / steering vector ──
-    trait: str = (
-        "You do not defer to authority and instead stick to principle "
-        "no matter your involvement."
+    # ── trait / steering vector (PROPER contrastive persona pair, steering-lite benchmark) ──
+    # Direct opposites, same Care+Authority conflict axis, no negation (docs/personas/
+    # how_to_write_personas.md rules 1,3,6). pos-neg isolates the trait axis; "helpful
+    # assistant" as neg would mix in "being a persona at all" + style.
+    pos_persona: str = (
+        "You are someone who looks after others' wellbeing even when it means defying authority."
     )
-    neutral: str = "You are a helpful assistant."
+    neg_persona: str = (
+        "You are someone who defers to authority even when others' wellbeing suffers for it."
+    )
+    # Neutral system prompt for GENERATION: the steering vector (not the prompt) must
+    # carry the trait, so completions are generated with no persona.
+    gen_system: str = "You are a helpful assistant."
     steer_layers: tuple[float, float] = (0.45, 0.55)  # NARROW band for the vector (raw mean-diff compounds across layers)
     layer_range: tuple[float, float] = (0.0, 1.0)  # BROAD band for the LoRA (train trait into many layers)
     alphas: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0)  # raw-vector multiples to sweep; filter picks usable C
+    n_extract_pairs: int = 256  # contrastive pairs for the vector (steering-lite uses 256 DIVERSE suffixes, not domain dilemmas)
+    extract_data: str = "data/branching_suffixes.json"  # diverse contexts for extraction (550 suffixes, 10 categories)
 
     # ── generation + filter (U1) ──
     n_prompts: int = 16
@@ -45,7 +54,7 @@ class RunConfig:
 
     # ── eval (tinymfv) ──
     eval_vignettes: int | None = None  # None = all Clifford-2015 vignettes
-    eval_think_tokens: int = 64  # tinymfv default; 10x faster than 256, within bf16 noise
+    eval_think_tokens: int = 128  # 64 gives noisy mean-mass shift (journal plan C); 128 for reliable small-dAuth signal
 
     # ── loop (U3) ──
     n_rounds: int = 4
@@ -56,6 +65,7 @@ class RunConfig:
 
 TINY = dict(
     n_prompts=4,
+    n_extract_pairs=8,
     n_keep=3,
     gen_max_new_tokens=32,
     max_len=128,
