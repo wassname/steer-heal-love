@@ -43,5 +43,9 @@ sweep-reg:
         done
     done
 
+# Aggregate results.tsv into a by-arm markdown table.
+results:
+    uv run python scripts/results.py
+
 # flash-attn: install a prebuilt wheel (see `flash-attn-prebuilt` skill), then
 # run with STEER_ATTN_IMPL=flash_attention_2.

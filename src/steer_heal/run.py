@@ -10,6 +10,7 @@ file fails fast at the first unimplemented stage rather than stubbing fake
 behaviour. `--fast-dev-run` runs the whole thing on the tiny-random model.
 """
 
+import dataclasses
 import os
 import sys
 from datetime import datetime
@@ -24,6 +25,17 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from steer_heal.config import RunConfig, resolve
 
 REPO = Path(__file__).resolve().parents[2]
+RESULTS_TSV = REPO / "results.tsv"  # one row per finished run; `just results` aggregates
+
+
+def append_result(cfg: RunConfig, metrics: dict) -> None:
+    # self-describing, copy-paste reproducible row: config + final metrics + argv.
+    row = {**dataclasses.asdict(cfg), **metrics, "argv": " ".join(sys.argv[1:])}
+    new = not RESULTS_TSV.exists()
+    with open(RESULTS_TSV, "a") as f:
+        if new:
+            f.write("\t".join(row) + "\n")
+        f.write("\t".join(str(v) for v in row.values()) + "\n")
 
 
 def setup_logging() -> None:
@@ -80,14 +92,16 @@ def evaluate(model, cfg: RunConfig) -> dict:
     raise NotImplementedError("TODO: tinymfv eval + plotly map (port csm/plot.py _build_scatter)")
 
 
-def steer_heal(model, tok, orig, cfg: RunConfig):
+def steer_heal(model, tok, orig, cfg: RunConfig) -> dict:
+    metrics = {}
     for r in range(cfg.n_rounds):
         logger.info(f"── round {r} ──")
         v = teacher_vec(model, tok, cfg)
         comps = generate_and_filter(model, tok, v, orig, cfg)
         heal(model, orig, comps, cfg)
-        logger.info(evaluate(model, cfg))
-    return model
+        metrics = {"round": r, **evaluate(model, cfg)}
+        logger.info(metrics)
+    return metrics  # final round, for results.tsv
 
 
 def main(cfg: RunConfig) -> None:
@@ -98,7 +112,9 @@ def main(cfg: RunConfig) -> None:
     dtype = getattr(torch, cfg.dtype)
     model, tok = load_model(cfg.model, dtype)
     orig = model  # round-0 anchor; KL reference = same module with adapter gates off
-    steer_heal(model, tok, orig, cfg)
+    metrics = steer_heal(model, tok, orig, cfg)
+    append_result(cfg, metrics)
+    logger.info(f"done; appended to {RESULTS_TSV.name}")
 
 
 if __name__ == "__main__":
