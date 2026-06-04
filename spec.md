@@ -201,3 +201,13 @@ Per setup-repo, the single functional test is `just fast-dev-run`: the real pipe
 - U2 heal gate: `results/u2_heal_gate.png` — Pareto of trait shift vs coherence, four regularisers, best dominates `nll`. Link.
 - U3 loop gate: `results/u3_loop.png` — auth shift, coherence, direction cosines per round; monotone trait, coherence above floor. Link.
 - Samples: first 3 train completions and first 3 eval generations printed in full (prompt + special tokens), confirming enact-not-narrate and correct formatting.
+
+## Log
+
+gsd/lgtm: goals tracked in the task list with distinguishing checks (success looks different from silent failure) and a fresh-eyes subagent verify; one goal per Q.
+
+- 2026-06-04 spec + scaffold done; vendored steering-lite, isokl, tinymfv, w2schar-mini.
+- 2026-06-04 verified vendor APIs (file-anchored): steering-lite `Vector.train` does NOT apply the chat template, so we pre-template ending at the assistant tag (last-non-pad read lands there); `v.calibrate(target_kl)` sets `cfg.coeff`; tinymfv `evaluate()` returns `mean_pmass_allowed` (coherence canary) + per-foundation profile (auth/care). Prompt set resolved: reuse w2schar `POOL` (30 authority dilemmas), copied to `prompts.py`.
+- 2026-06-04 decision: coherence = `mean_pmass_allowed` AND `valid_json` free-gen, self-relative to base c=0 (per w2schar CLAUDE.md); foundation shift (auth/care) is the trait signal, kept distinct from coherence.
+- 2026-06-04 decision: KL reference anchored to round-0 original via the `C_0=C_N=0` gate; bake via copied `ws.bake.baked`; no merge.
+- 2026-06-04 implementing: copied `ws/{adapter,bake}.py`; wrote `io.py`, `prompts.py`, `steering.py`. Next: filter, heal, eval, plot, wire `run.py`, then `fast-dev-run` end to end.

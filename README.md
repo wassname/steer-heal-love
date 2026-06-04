@@ -1,8 +1,12 @@
 # steer-heal-love
 
+What if you can **steer**, **heal** the steering and repeat untill alignment (**love**). 
+<!--(Staring Julia Roberts: If your wife has made you watch eat, pray love too many times, you will understand the reference)-->
+
 Hypothesis: you can distill a steering vector into LoRA weights and "heal" the incoherency the vector injects by regularising the training (KL to base, or weight decay). Then loop and see what multiple rounds give you.
 
 The crux: KL-to-base penalises all drift, persona shift included. The bet is that incoherency drift is large and erratic while the persona shift is small and systematic, so KL kills the incoherency preferentially. If that's wrong, we just trade persona strength for coherence instead of getting both.
+
 
 ## Experiment
 
@@ -19,6 +23,12 @@ The crux: KL-to-base penalises all drift, persona shift included. The bet is tha
 6. Eval the checkpoint on https://github.com/wassname/tinymfv.
 7. If it works, loop. We could even do this online, GRPO-style per batch, or iteratively. Iterative is simpler to start.
 - **Q2: is it coherent over a loop?**
+- **Q3: does it keep moving consistency in a direction?**
+
+
+Most likely failure modes: 
+- It fails at the 4 Q's above
+- doesn't beat a prompting baseline
 
 ## Motovation:
 
@@ -26,4 +36,9 @@ If it works it will be a novel alignment method that works without label and mig
 
 ## Eval
 
-Plot the tinymfv progress over time on the auth vs care axis, with a subplot for a coherence measure. tinymfv gives a few: `p_ans_any` (best), `json_is_valid`, `ppx_json`.
+Plot the tinymfv progress over time on the auth vs care axis
+
+
+# Results
+
+TODO insert plot

@@ -25,6 +25,7 @@ dependencies = [
     "steering-lite",
     "iso-kl-figure",
     "tiny-mfv",
+    "srsly>=2.5.3",
 ]
 
 [tool.uv.sources]
