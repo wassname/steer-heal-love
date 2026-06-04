@@ -11,6 +11,7 @@ previous student, so it resists cumulative drift. reg picks the divergence:
 import torch
 from loguru import logger
 from torch.nn import functional as F
+from tqdm import tqdm
 
 from steer_heal.config import RunConfig
 from steer_heal.ws.adapter import ModulatedLoRA
@@ -31,14 +32,28 @@ def _encode(tok, prompt: str, completion: str, max_len: int, device):
 
 def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg: RunConfig):
     """Train a fresh round adapter on top of baked history. Returns (lora, spec)."""
+    assert len(kept) >= cfg.min_train, (
+        f"only {len(kept)} kept completions; need >= {cfg.min_train} to train. The steering/filter "
+        "starved the data (over-steered -> all garbage, or ppl_tau too strict). Fix upstream, do not train."
+    )
     lora = ModulatedLoRA(model, r=cfg.lora_r, alpha=cfg.lora_alpha, layer_range=cfg.layer_range)
-    opt = torch.optim.AdamW(list(lora.parameters()), lr=cfg.lr,
-                            weight_decay=(cfg.lam if cfg.reg == "wd" else 0.0))
+    params = list(lora.parameters())
+    opt = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=(cfg.lam if cfg.reg == "wd" else 0.0))
+    n_steps = len(kept) * cfg.epochs
 
+    # streaming training table (token-efficient-logging): one row, columns self-decode below.
+    logger.info(f"heal[{cfg.reg}] {len(kept)} completions x {cfg.epochs} ep = {n_steps} steps; "
+                f"lora r={cfg.lora_r} on layers {cfg.layer_range}")
+    logger.info("SHOULD: nll (SFT) falls as the adapter learns the trait; kl (barrier div) is 0 for "
+                "reg=nll/wd and >0 for kl_rev/kl_fwd; gnorm finite (not exploding). loss = nll + lam*relu(kl-tau).")
+    logger.info("  step    nll↓     kl    loss↓   gnorm")
+    pbar = tqdm(total=n_steps, desc=f"heal[{cfg.reg}]", mininterval=120, maxinterval=120)
+    step = 0
     for ep in range(cfg.epochs):
         for c in kept:
             ids, mask = _encode(tok, c["prompt"], c["completion"], cfg.max_len, model.device)
             if mask.sum() == 0:
+                pbar.update(1); step += 1
                 continue  # completion truncated away; nothing to learn here
 
             # original reference logits (no history, adapter off) for the barrier
@@ -61,9 +76,16 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
                 div = torch.zeros((), device=model.device)  # nll, wd
             loss = sft + cfg.lam * torch.relu(div - cfg.tau)
             loss.backward()
+            gnorm = torch.nn.utils.clip_grad_norm_(params, 1.0)
             opt.step()
             opt.zero_grad()
-        logger.info(f"heal[{cfg.reg}] epoch {ep}: sft={sft.item():.3f} div={div.detach().item():.3f}")
+            if step % max(1, n_steps // 20) == 0 or step == n_steps - 1:
+                logger.info(f"  {step:4d}  {sft.item():7.3f}  {div.detach().item():6.3f}  "
+                            f"{loss.item():7.3f}  {float(gnorm):6.2f}")
+            pbar.set_postfix(nll=f"{sft.item():.2f}", kl=f"{div.detach().item():.2f}", gn=f"{float(gnorm):.1f}")
+            pbar.update(1)
+            step += 1
+    pbar.close()
 
     spec = AdapterSpec.from_lora(lora, default_c=1.0)  # CPU-resident, for the next round's history
     return lora, spec

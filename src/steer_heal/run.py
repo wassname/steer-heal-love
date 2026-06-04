@@ -94,8 +94,9 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
             "COHERENTLY (healed) where raw steering was incoherent. If adapter_ppl >= steered_ppl, "
             f"healing failed. adapter_ppl={adapter_ppl:.0f} steered_ppl={steered_ppl:.0f}"
         )
-        logger.info(f"--- ADAPTER SAMPLE r{rnd} (no steering, SHOULD show trait + be coherent) ---\n"
-                    f"{adapter[0]['completion'][:500]}")
+        logger.info(f"\n=== TRAIN/ADAPTER SAMPLE r{rnd} coherence(p_ans_any)={m['coherence']:.3f} "
+                    f"adapter_ppl={adapter_ppl:.0f} (no steering; SHOULD show trait AND be coherent) ===\n"
+                    f"PROMPT: {adapter[0]['prompt']}\nCOMPLETION: {adapter[0]['completion']}")
 
         vf = _flatten_v(v)
         v0_flat = vf if v0_flat is None else v0_flat

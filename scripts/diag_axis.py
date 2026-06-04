@@ -16,8 +16,8 @@ sys.path.insert(0, "src")
 from steer_heal.config import RunConfig  # noqa: E402
 from steer_heal.steering import teacher_vec  # noqa: E402
 
-MODEL = "google/gemma-3-1b-it"
-cfg = RunConfig(model=MODEL, n_prompts=12)
+cfg = RunConfig(n_prompts=12)  # default model (gemma-3-4b-it)
+MODEL = cfg.model
 
 tok = AutoTokenizer.from_pretrained(MODEL)
 if tok.pad_token is None:

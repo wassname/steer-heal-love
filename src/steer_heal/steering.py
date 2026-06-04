@@ -16,7 +16,7 @@ def _layer_band(model, layer_range: tuple[float, float]) -> tuple[int, ...]:
 
 def teacher_vec(model, tok, cfg: RunConfig):
     """trait-sysprompt vs neutral-sysprompt mean-diff, then iso-KL dose to target_kl."""
-    layers = _layer_band(model, cfg.layer_range)
+    layers = _layer_band(model, cfg.steer_layers)  # narrow band; raw mean-diff compounds across layers
     prompts = POOL[: cfg.n_prompts] if cfg.n_prompts <= len(POOL) else POOL
     pos = [chat_prompt(tok, cfg.trait, q) for q in prompts]
     neg = [chat_prompt(tok, cfg.neutral, q) for q in prompts]

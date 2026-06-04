@@ -21,12 +21,14 @@ class RunConfig:
         "no matter your involvement."
     )
     neutral: str = "You are a helpful assistant."
-    layer_range: tuple[float, float] = (0.4, 0.6)  # fraction of depth to steer
-    alphas: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0)  # raw-vector multiples to sweep; filter picks usable C
+    steer_layers: tuple[float, float] = (0.45, 0.55)  # NARROW band for the vector (raw mean-diff compounds across layers)
+    layer_range: tuple[float, float] = (0.0, 1.0)  # BROAD band for the LoRA (train trait into many layers)
+    alphas: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0)  # raw-vector multiples to sweep; filter picks usable C
 
     # ── generation + filter (U1) ──
-    n_prompts: int = 64
-    n_keep: int = 50
+    n_prompts: int = 16
+    n_keep: int = 64
+    min_train: int = 20  # assert at least this many kept completions, else steering/filter starved
     gen_max_new_tokens: int = 256
     max_len: int = 1024
     ppl_tau: float = 50.0  # drop completions with ppl-under-original above this
@@ -60,6 +62,7 @@ TINY = dict(
     epochs=1,
     n_rounds=1,
     alphas=(1.0, 4.0),
+    min_train=2,
     eval_vignettes=4,
     eval_think_tokens=16,
     ppl_tau=1e9,  # tiny-random produces junk ppl; relax the gate so the path still runs

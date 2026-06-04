@@ -78,9 +78,11 @@ def _log_filter_report(scored: list[dict], cfg: RunConfig) -> None:
                 tabulate(g.to_pandas(), headers="keys", tablefmt="github", floatfmt=".2f"))
     lo = min(scored, key=lambda s: s["alpha"])
     hi = max(scored, key=lambda s: s["alpha"])
-    logger.info(f"\n--- SAMPLE @alpha={lo['alpha']:g} ppl={lo['ppl']:.0f} keep={lo['keep']} "
-                f"(SHOULD be coherent) ---\n{lo['completion'][:500]}")
-    logger.info(f"\n--- SAMPLE @alpha={hi['alpha']:g} ppl={hi['ppl']:.0f} keep={hi['keep']} "
-                f"(SHOULD be garbage if steering strong) ---\n{hi['completion'][:500]}")
+    # Full, untruncated dumps so we can judge coherence + trait ourselves (token-efficient-logging).
+    logger.info(f"\n=== STEER SAMPLE @alpha={lo['alpha']:g} ppl={lo['ppl']:.0f} keep={lo['keep']} "
+                f"(low C, SHOULD be coherent + on-trait) ===\nPROMPT: {lo['prompt']}"
+                f"\nCOMPLETION: {lo['completion']}")
+    logger.info(f"\n=== STEER SAMPLE @alpha={hi['alpha']:g} ppl={hi['ppl']:.0f} keep={hi['keep']} "
+                f"(high C, SHOULD be garbage if over-steered) ===\nCOMPLETION: {hi['completion']}")
     logger.info(f"filter kept {len([s for s in scored if s['keep']])}/{len(scored)} "
                 f"(ppl<{cfg.ppl_tau:g}, rep<{cfg.rep_tau}, not-narrate)")
