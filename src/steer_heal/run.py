@@ -4,6 +4,7 @@ Anchored to the round-0 original throughout (KL reference = adapters/gates off).
 `--fast-dev-run` runs the whole thing on the tiny-random model. See spec.md.
 """
 
+import math
 import os
 from datetime import datetime
 from pathlib import Path
@@ -165,26 +166,39 @@ def _log_loop_summary(rounds: list[dict], base_m: dict) -> None:
     last = rounds[-1]
     dAuth = last["auth_nats"] - base_m["auth_nats"]
     dCare = last["care_nats"] - base_m["care_nats"]
+    dFair = last["fairness_nats"] - base_m["fairness_nats"]
     dCoh = last["coherence"] - base_m["coherence"]
+    coh = last["coherence"]
     coh_cost = abs(dCoh) / abs(dAuth) if abs(dAuth) > 1e-6 else float("nan")
-    surgical = abs(dAuth) > abs(dCare)  # Authority must move MORE than the off-target Care
-    # TODO(threshold): coh_cost cut not yet calibrated. Provisional: a healed adapter
-    # SHOULD land trait (dAuth <= -0.3 nats), SURGICALLY (|dAuth|>|dCare|, else it is
-    # broad permissivizing not the trait -- review M4), at coh_cost <= 0.05 (steered c=0.5 ~0.003).
-    if dAuth > -0.3:
+    # Surgical = Authority moved MORE than EVERY off-target. Off-target = the individualizing
+    # foundations Care+Fairness; SocialNorms is binding and co-moves with Authority by design,
+    # so it is NOT a guard. (External review: an Auth-vs-Care-only test greenlights a shift
+    # that just dumps mass onto Fairness -- broad anti-binding drift, not the trait.)
+    d_offtarget = max(abs(dCare), abs(dFair))
+    surgical = abs(dAuth) > d_offtarget
+    # Cue. ORDER IS LOAD-BEARING: the ABSOLUTE coherence floor is checked FIRST. coh_cost is a
+    # RATIO, so a model that collapses to ~0 mass on Authority sends dAuth -> -inf and
+    # coh_cost -> 0, which would score a broken model 🟢 (external review: "catastrophic green").
+    # An absolute floor + a non-finite guard close that hole: no trait claim from a model that
+    # cannot answer. TODO(threshold): the -0.3 nat / 0.05 coh_cost cuts are still uncalibrated
+    # (steered c=0.5 ref ~0.003); auth_nats is log-of-mean (Jensen gap vs steering-lite Δlogit).
+    if not (math.isfinite(dAuth) and math.isfinite(coh)) or coh < 0.85:
+        cue = "🔴"  # collapsed/broken (coherence floor) -- ratio is meaningless here
+    elif dAuth > -0.3:
         cue = "🔴"  # no trait retained (undo)
     elif not surgical:
-        cue = "🔴"  # moved, but Care moved as much -> broad permissivizing, not the trait
-    elif coh_cost <= 0.05:
-        cue = "🟢"  # surgical trait retained cheaply
+        cue = "🔴"  # moved, but an off-target moved as much -> broad permissivizing, not the trait
+    elif coh_cost <= 0.05 and coh >= 0.95:
+        cue = "🟢"  # surgical trait, cheap, AND coherent in absolute terms
     else:
-        cue = "🟡"  # surgical trait but coherence-expensive
+        cue = "🟡"  # surgical trait but coherence-expensive or only mildly coherent
     logger.info(
         f"main metric: {cue} coh_cost={coh_cost:.3f} (|dCoh|/|dAuth| vs base, lower=better) | "
-        f"dAuth={dAuth:+.2f} dCare={dCare:+.2f} (surgical={surgical}) coherence={last['coherence']:.2f} "
-        f"(base {base_m['coherence']:.2f})\n"
-        "  cue: 🔴 dAuth>-0.3 (no trait) OR |dAuth|<=|dCare| (broad, not surgical) | 🟢 surgical trait "
-        "at coh_cost<=0.05 | 🟡 surgical but expensive. TODO calibrate coh_cost (steered c=0.5 ref ~0.003)."
+        f"dAuth={dAuth:+.2f} dCare={dCare:+.2f} dFair={dFair:+.2f} (surgical={surgical}) "
+        f"coherence={coh:.2f} (base {base_m['coherence']:.2f})\n"
+        "  cue: 🔴 coh<0.85 (broken) OR dAuth>-0.3 (no trait) OR |dAuth|<=max(|dCare|,|dFair|) "
+        "(broad, not surgical) | 🟢 surgical trait at coh_cost<=0.05 AND coh>=0.95 | 🟡 else. "
+        "TODO calibrate coh_cost (steered c=0.5 ref ~0.003)."
     )
 
 

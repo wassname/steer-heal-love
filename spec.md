@@ -229,6 +229,51 @@ because the coherence filter removed the trait-laden completions before training
   fixed weight delta -- if we use gating for extraction we still need a bakeable distillate. Check
   which steering-lite methods are weight-foldable before adopting.
 
+## External review panel (2026-06-04)
+
+Five non-Anthropic reviewers (deepseek-v4-pro, grok-4.3, gemini-3.5-flash, local qwen3.6:35b;
+mistral returned empty) over spec + src. Two CONFIRMED code bugs were fixed this round; the rest
+are design risks recorded here.
+
+Fixed (code):
+- Catastrophic-green cue (gemini, sharpest; echoed by deepseek/qwen). `coh_cost = |dCoh|/|dAuth|`
+  is a pure ratio: a model that collapses to ~0 mass on Authority sends dAuth -> -inf so coh_cost
+  -> 0, scoring a broken model green. Fix (run.py): check an ABSOLUTE coherence floor (coh < 0.85
+  -> red) and finiteness FIRST, require coh >= 0.95 for green, and broaden surgicality from
+  |dAuth|>|dCare| to |dAuth| > max(|dCare|,|dFair|) (a shift dumping mass onto Fairness was passing
+  the Care-only test).
+- BPE-boundary assert escaped at the max_len/truncation boundary (grok, gemini, qwen, unanimous).
+  Fix (heal.py): assert the surviving prefix overlap min(n_prompt, L) unconditionally; warn (not
+  silently skip) when a kept completion truncates to zero target tokens.
+
+Design risks (NOT fixed, inform the loop + Plan work):
+- Loop barrier undoes its own history (gemini "history erasure", grok, deepseek). KL anchored to
+  the round-0 original while history is baked into the student means by round>=1 the cumulative
+  drift already exceeds tau, so the relu barrier is permanently active and its gradient pushes the
+  fresh adapter to OPPOSE the trait the frozen history installed. Plausibly a dominant cause of the
+  loop undo. -> for U3 consider anchoring the barrier to the PREVIOUS student, or normalising tau by
+  historical drift (supports the "less barrier" direction, task 17).
+- Barrier mean-dilution (deepseek). div = mean over completion tokens of KL; a few catastrophically
+  incoherent tokens are diluted by many in-distribution ones, so the mean stays < tau and kl_rev
+  silently == nll. A max or high-quantile KL would penalise localised incoherence. METHOD change
+  (alters the objective) -> deliberate decision, do not silently switch.
+- ppl-under-base is a STYLE proxy, not coherence (deepseek, gemini, grok, qwen, independently
+  re-deriving the known journal confound). Fluent-but-stylistically-novel on-trait completions score
+  high ppl and get dropped -> survivorship toward base-like training data.
+- Construct validity (gemini, qwen, deepseek). tinymfv is 3rd-person forced-choice classification;
+  steering installs a 1st-person persona, so the link is an indirect propensity proxy. No
+  neutral-instruction control rules out format/instruction-following artefacts.
+- teacher_vec drift (gemini, deepseek): v re-extracted from the baked student can decay as the trait
+  internalises (contrastive delta shrinks); cos_v0 already watches this.
+- NARRATE regex brittle (deepseek): paraphrased verbalisation ("I never obey without question")
+  evades it and leaks narration into training.
+
+Verified FALSE positives (do not re-chase): qwen's "n_prompt = prompt_ids.shape[0] reads the batch
+dim" -- the line uses `.input_ids[0]`, so prompt_ids is 1-D and shape[0] IS the seq len. grok/qwen's
+"profile['model'] may be model_T/top1" -- tinymfv eval.py:316 confirms it is the mean over vignettes
+of per-row p (the marginal). grok's "KL reference can't be the round-0 original" -- c=0.0 + no baked()
+is the pristine base by construction.
+
 ## UAT summary (proof, not assertion)
 
 - U1 filter gate: `results/u1_filter_gate.md` — labelled set, scorer separation. Link when done.

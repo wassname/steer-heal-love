@@ -26,15 +26,17 @@ def _encode(tok, prompt: str, completion: str, max_len: int, device):
     ids = tok(prompt + completion, return_tensors="pt", truncation=True, max_length=max_len).to(device)
     prompt_ids = tok(prompt, return_tensors="pt").input_ids[0].to(device)
     n_prompt = prompt_ids.shape[0]
-    # Assert the prompt tokenizes as a clean PREFIX of prompt+completion. If a BPE merge
-    # spans the boundary, n_prompt is wrong and the SFT mask silently shifts by a token
-    # (review M6). Truncation can drop the tail, so only check when not truncated.
-    if ids.input_ids.shape[1] >= n_prompt and ids.input_ids.shape[1] < max_len:
-        assert torch.equal(ids.input_ids[0, :n_prompt], prompt_ids), (
-            "prompt is not a token-prefix of prompt+completion (BPE boundary merge); "
-            "the SFT loss mask would be misaligned by a token."
-        )
     L = ids.input_ids.shape[1]
+    # Assert the prompt tokenizes as a clean PREFIX of prompt+completion. If a BPE merge spans
+    # the boundary, n_prompt is wrong and the SFT mask silently shifts by a token. Truncation
+    # keeps the FRONT (whole prompt + partial completion), so check the overlap that survives --
+    # min(n_prompt, L). This always runs, including the max_len boundary the earlier guard skipped
+    # (external review: a merge at exactly max_len escaped the < max_len check).
+    n_check = min(n_prompt, L)
+    assert torch.equal(ids.input_ids[0, :n_check], prompt_ids[:n_check]), (
+        "prompt is not a token-prefix of prompt+completion (BPE boundary merge); "
+        "the SFT loss mask would be misaligned by a token."
+    )
     tgt_is_completion = torch.arange(1, L, device=device) >= n_prompt  # mask over next-token targets
     return ids, tgt_is_completion
 
@@ -64,8 +66,11 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
         for c in kept:
             ids, mask = _encode(tok, c["prompt"], c["completion"], cfg.max_len, model.device)
             if mask.sum() == 0:
+                # prompt filled max_len so the completion was truncated to zero target tokens.
+                # Loud, not silent: this is a kept completion lost from training (review).
+                logger.warning(f"heal: 0 target tokens (prompt >= max_len={cfg.max_len}), skipping a kept completion")
                 pbar.update(1); step += 1
-                continue  # completion truncated away; nothing to learn here
+                continue
 
             # original reference logits (no history, adapter off) for the barrier
             if cfg.reg in ("kl_fwd", "kl_rev"):
