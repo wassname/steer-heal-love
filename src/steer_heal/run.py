@@ -78,16 +78,18 @@ def _stage_row(rnd, stage: str, m: dict, base_m: dict) -> dict:
     dAuth = m["auth_nats"] - base_m["auth_nats"]
     dCoh = m["coherence"] - base_m["coherence"]
     ratio = dCoh / dAuth if abs(dAuth) > 1e-6 else float("nan")
-    return {"round": rnd, "stage": stage, "dcoh/dauth": ratio,
-            "coh": m["coherence"], "auth": m["auth_nats"], "care": m["care_nats"]}
+    # arrows in keys -> render in the table header. dcoh/dauth: lower=better (0 = trait at
+    # no coherence cost; >0 = paid coherence; <0 = coherence rose too). coh: hold ~1.0. auth: down=trait.
+    return {"round": rnd, "stage": stage, "dcoh/dauth↓": ratio,
+            "coh→": m["coherence"], "auth↓": m["auth_nats"], "care": m["care_nats"]}
 
 
 def _log_stage_table(stage_rows: list[dict]) -> None:
     from tabulate import tabulate
     logger.info(
         "\nstage pareto (base -> steered -> healed, per round):\n"
-        "  dcoh/dauth = coherence change per nat of Authority change vs base (signed, lower=cheaper trait)\n"
-        "         coh = p_any_ans coherence (hold ~1.0)   auth = log p[Authority] (DOWN = trait)   care = log p[Care] (off-target)\n"
+        "  dcoh/dauth↓ = coherence change per nat of Authority change vs base (signed); 0 = trait at no coherence cost, >0 = paid coherence (worse), <0 = coherence rose too\n"
+        "         coh→ = p_any_ans coherence (hold ~1.0)   auth↓ = log p[Authority] (DOWN = trait)   care = log p[Care] (off-target)\n"
         "  WIN: healed keeps steered's low auth (trait) but recovers coh toward base AND a smaller dcoh/dauth than steered.\n"
         "  UNDO: healed auth springs back to ~base while coh recovers -> heal removed the trait, not just the incoherence.\n"
         + tabulate(stage_rows, headers="keys", tablefmt="github", floatfmt=".3f") + "\n")
