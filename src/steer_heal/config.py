@@ -29,7 +29,7 @@ class RunConfig:
     # carry the trait, so completions are generated with no persona.
     gen_system: str = "You are a helpful assistant."
     steer_layers: tuple[float, float] = (0.45, 0.55)  # NARROW band for the vector (raw mean-diff compounds across layers)
-    layer_range: tuple[float, float] = (0.0, 1.0)  # BROAD band for the LoRA (train trait into many layers)
+    layer_range: tuple[float, float] = (0.2, 0.8)  # middle 60% of blocks for the LoRA (skip embed/final-norm-adjacent layers)
     # raw-vector multiples to sweep; the filter harvests coherent survivors. Dropped 0.25
     # (filter audit: base-like, no distinct trait); kept 0.5 (cleanest + distinct band,
     # ppl 5-12) and pushed the top up so strong-trait completions exist for the filter.
@@ -50,10 +50,15 @@ class RunConfig:
     reg: Literal["nll", "kl_fwd", "kl_rev", "wd"] = "kl_rev"
     lam: float = 1.0  # barrier weight (also weight_decay when reg == "wd")
     tau: float = 0.5  # barrier engages only when divergence > tau (nats)
-    lora_r: int = 8
-    lora_alpha: float = 16.0
-    epochs: int = 2
+    lora_r: int = 32
+    lora_alpha: float = 64.0  # keep scale = alpha/r = 2 (w2s convention alpha = 2r)
+    epochs: int = 6  # was 2: too few steps to see loss descend; val nll guards overfit
     lr: float = 1e-4
+    warmup_ratio: float = 0.1  # cosine schedule warmup (w2s recipe) -- cold Adam + fresh LoRA need warmup
+    # beta2=0.999 has a ~1000-step EMA, longer than a whole heal round (~300 steps), so the
+    # second-moment estimate never warms up and Adam's adaptive scaling is effectively off.
+    # 0.95 -> ~20-step EMA, warms in ~40 steps. beta1 standard.
+    adam_betas: tuple[float, float] = (0.9, 0.95)
 
     # ── eval (tinymfv) ──
     eval_vignettes: int | None = None  # None = all Clifford-2015 vignettes

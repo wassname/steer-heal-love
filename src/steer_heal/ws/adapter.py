@@ -116,8 +116,13 @@ class ModulatedLoRA:
             d_in, d_out = layer.in_features, layer.out_features
             A = torch.empty(self.cfg.r, d_in, dtype=self.cfg.dtype, device=device)
             nn.init.kaiming_uniform_(A, a=5 ** 0.5)
-            B = torch.empty(d_out, self.cfg.r, dtype=self.cfg.dtype, device=device)
-            nn.init.normal_(B, mean=1e-4, std=1e-4)
+            B = torch.zeros(d_out, self.cfg.r, dtype=self.cfg.dtype, device=device)
+            # B=0 => delta = B@A = 0, so a fresh adapter is a true no-op at init: round-0 step-0
+            # student logits == base, hence barrier KL(student||orig) starts at 0 (only baked
+            # history can diverge). The old normal_(mean=1e-4) perturbed EVERY all-linear layer
+            # in a systematic (nonzero-mean) direction, compounding across ~200 adapters into a
+            # phantom ~0.6-nat KL before any training -- it sat above tau and fired the barrier
+            # against nothing real. A still gets gradient via B once B leaves zero (standard LoRA).
             self.A[name] = nn.Parameter(A)
             self.B[name] = nn.Parameter(B)
             self._target_layers[name] = layer
