@@ -49,6 +49,7 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
     logger.info("  step   nll↓    kl  loss↓  gnorm")
     pbar = tqdm(total=n_steps, desc=f"heal[{cfg.reg}]", mininterval=120, maxinterval=120)
     step = 0
+    nlls = []  # per-step SFT loss; final = mean of last 5, the heal-stage number for the round table
     for ep in range(cfg.epochs):
         for c in kept:
             ids, mask = _encode(tok, c["prompt"], c["completion"], cfg.max_len, model.device)
@@ -75,6 +76,7 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
             else:
                 div = torch.zeros((), device=model.device)  # nll, wd
             loss = sft + cfg.lam * torch.relu(div - cfg.tau)
+            nlls.append(sft.item())
             loss.backward()
             gnorm = torch.nn.utils.clip_grad_norm_(params, 1.0)
             opt.step()
@@ -88,4 +90,6 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
     pbar.close()
 
     spec = AdapterSpec.from_lora(lora, default_c=1.0)  # CPU-resident, for the next round's history
-    return lora, spec
+    last = nlls[-5:]
+    heal_nll = sum(last) / len(last) if last else float("nan")  # converged SFT loss (last-5 mean)
+    return lora, spec, heal_nll

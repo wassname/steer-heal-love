@@ -30,7 +30,10 @@ class RunConfig:
     gen_system: str = "You are a helpful assistant."
     steer_layers: tuple[float, float] = (0.45, 0.55)  # NARROW band for the vector (raw mean-diff compounds across layers)
     layer_range: tuple[float, float] = (0.0, 1.0)  # BROAD band for the LoRA (train trait into many layers)
-    alphas: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0)  # raw-vector multiples to sweep; filter picks usable C
+    # raw-vector multiples to sweep; the filter harvests coherent survivors. Dropped 0.25
+    # (filter audit: base-like, no distinct trait); kept 0.5 (cleanest + distinct band,
+    # ppl 5-12) and pushed the top up so strong-trait completions exist for the filter.
+    alphas: tuple[float, ...] = (0.5, 0.75, 1.0, 1.5)
     n_extract_pairs: int = 256  # contrastive pairs for the vector (steering-lite uses 256 DIVERSE suffixes, not domain dilemmas)
     extract_data: str = "data/branching_suffixes.json"  # diverse contexts for extraction (550 suffixes, 10 categories)
 
