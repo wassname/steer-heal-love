@@ -86,17 +86,23 @@ def write_trajectory(run_dir: Path, stages: list[dict]) -> Path:
         marker=dict(size=14, color=GREY, symbol="star"), showlegend=False,
         hovertext=[f"base auth={bx:.3f} coh={by:.3f}"], hoverinfo="text",
     ), row=1, col=2)
+    # scatter, NOT a polyline: the left zigzag panel already carries round order, so a
+    # connecting line here would just duplicate it (and tangle at 10 rounds). The map's one
+    # job is WHERE the two populations land in trait-coherence space -- steered scatters left
+    # (more trait, more variance), healed clusters near base (the stall). Label only the
+    # extremes (r0 + last round) so the labels don't collide in the cluster.
+    last_rnd = max(p["round"] for p in stages if p["stage"] == "healed")
     for stage_kind, color, label in [("steered", RED, "steer"), ("healed", GREEN, "heal")]:
         pts = [s for s in stages if s["stage"] == stage_kind]
-        xs = [bx] + [p["m"]["auth_nats"] for p in pts]
-        ys = [by] + [p["m"]["coherence"] for p in pts]
-        txt = [""] + [f"r{p['round']}" for p in pts]
-        hov = [f"base"] + [f"{label} r{p['round']} auth={p['m']['auth_nats']:.3f} "
-                           f"coh={p['m']['coherence']:.3f} care={p['m']['care_nats']:.3f}" for p in pts]
+        xs = [p["m"]["auth_nats"] for p in pts]
+        ys = [p["m"]["coherence"] for p in pts]
+        txt = [f"r{p['round']}" if p["round"] in (0, last_rnd) else "" for p in pts]
+        hov = [f"{label} r{p['round']} auth={p['m']['auth_nats']:.3f} "
+               f"coh={p['m']['coherence']:.3f} care={p['m']['care_nats']:.3f}" for p in pts]
         fig.add_trace(go.Scatter(
-            x=xs, y=ys, mode="lines+markers+text", text=txt, textposition="top center",
-            line=dict(color=color, width=2), marker=dict(size=11, color=color),
-            name=label, showlegend=False, hovertext=hov, hoverinfo="text",
+            x=xs, y=ys, mode="markers+text", text=txt, textposition="top center",
+            marker=dict(size=11, color=color), name=label, showlegend=False,
+            hovertext=hov, hoverinfo="text",
         ), row=1, col=2)
     fig.update_xaxes(title_text="auth_nats  (← more trait)", row=1, col=2)
     # same fixed coherence range as the line panel: shows the points hug the ceiling (coherence

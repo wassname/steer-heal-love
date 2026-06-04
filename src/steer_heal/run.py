@@ -105,6 +105,7 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     # trait), not just coherence. One extra eval per run.
     logger.info(f"\n=== EVAL base [tinymfv classic] gpu {gpu_mem()} ===")
     base_m = evaluate_model(model, tok, cfg)
+    log_event(run_dir, stage="base", round=-1, **base_m)  # persist so offline plot_run.py is self-contained
     stages = [{"round": "-", "stage": "base", "m": base_m}]  # base -> steered -> healed, for table + trajectory plot
     for rnd in range(cfg.n_rounds):
         logger.info(f"\n\n=== ROUND {rnd} [{cfg.model.split('/')[-1]} reg={cfg.reg}] gpu {gpu_mem()} ===")
