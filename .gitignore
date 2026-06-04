@@ -1,0 +1,11 @@
+outputs/
+results/
+logs/
+wandb/
+data/
+docs/vendor/
+__pycache__/
+*.pyc
+.env
+.venv/
+*.safetensors

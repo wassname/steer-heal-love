@@ -6,7 +6,9 @@ requires-python = ">=3.11"
 dependencies = [
     "torch",
     "transformers",
+    "accelerate",
     "datasets",
+    "safetensors",
     "einops",
     "jaxtyping",
     "beartype",
@@ -17,20 +19,21 @@ dependencies = [
     "tqdm",
     "numpy",
     "wandb",
-    "matplotlib",
+    "plotly",
     "baukit",
-    # wassname building blocks (added via uv add git+...; see [tool.uv.sources])
+    # wassname building blocks, vendored under docs/vendor (run `just vendor`)
     "steering-lite",
-    "iso-kl-steering-calibration",
-    "tinymfv",
-    "w2schar-mini",
+    "iso-kl-figure",
+    "tiny-mfv",
 ]
 
 [tool.uv.sources]
-steering-lite = { git = "https://github.com/wassname/steering-lite" }
-iso-kl-steering-calibration = { git = "https://github.com/wassname/isokl_steering_calibration" }
-tinymfv = { git = "https://github.com/wassname/tinymfv" }
-w2schar-mini = { git = "https://github.com/wassname/w2schar-mini" }
+# Editable path deps to the clones in docs/vendor (wassname's vendor pattern).
+# w2schar-mini is NOT a dep (needs py3.13 + pinned flash-attn wheels); we vendor
+# it for reference and copy its adapter/bake/plot modules into src/steer_heal/ws.
+steering-lite = { path = "docs/vendor/steering-lite", editable = true }
+iso-kl-figure = { path = "docs/vendor/isokl_steering_calibration", editable = true }
+tiny-mfv = { path = "docs/vendor/tinymfv", editable = true }
 baukit = { git = "https://github.com/davidbau/baukit.git" }
 
 [tool.ruff.lint]

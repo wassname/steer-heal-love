@@ -16,7 +16,9 @@ Building blocks, all yours unless noted:
 - steering-lite — https://github.com/wassname/steering-lite. Mean-diff steering vector extraction and hook-based application. `v = Vector.train(model, tok, pos, neg, MeanDiffC(...)).calibrate(model, tok, target_kl=1.0)`; apply with `with v(model, C=...): model.generate(...)`. Vector is L2-normalised per layer; application is `h + coeff * v` broadcast over positions (no norm-matching).
 - isokl_steering_calibration — https://github.com/wassname/isokl_steering_calibration. iso-KL calibration: bisects the coefficient until p95 per-token KL(steered||base) hits a target (default 1 nat), giving a deterministic dose `c_star`. Then sweep `alpha = c_star * [0.5, 1, 1.5, 2]`. Pairs KL with an "alive" coherence check (force a JSON boolean prefill, require >=0.75 mass on true/false), which is the same idea as tinymfv `p_ans_any`. Reports a cumulative coherence budget of ~1.7 nats across iterated rounds, directly relevant to our loop.
 - lora-lite — https://github.com/wassname/lora-lite. Hackable LoRA via forward hooks; base frozen, loss fully under our control (no built-in KL, we add it). Caveat: no merge/unmerge and one adapter per attach, so we do not "bake in" between rounds. Resolution: w2schar-mini's gated-history baking (below).
-- w2schar-mini — https://github.com/wassname/w2schar-mini. Conditioned LoRA (scalar gate `c`) in an iterated distillation loop, the closest prior setup to ours. `csm.ws.bake.baked` composes N gated adapters into the weights (`W += sum_i c_i*(alpha_i/r_i)*B_i A_i`) and restores on exit; `csm.ws.history.load_base_with_history` gates history off at `c=0` so the base stays pristine. Reuse this for the baking/accumulator and the `C_0=C_N=0` KL anchor instead of reimplementing.
+- w2schar-mini — https://github.com/wassname/w2schar-mini. Conditioned LoRA (scalar gate `c`) in an iterated distillation loop, the closest prior setup to ours. `csm.ws.bake.baked` composes N gated adapters into the weights (`W += sum_i c_i*(alpha_i/r_i)*B_i A_i`) and restores on exit; `csm.ws.history.load_base_with_history` gates history off at `c=0` so the base stays pristine. Reuse `ModulatedLoRA` + `baked` for the accumulator and the `C_0=C_N=0` KL anchor, and port `csm/plot.py` `_build_scatter` (plotly Care-vs-Authority scatter, one node per round, `to_html`) for our loop map. Not a dependency: it needs py3.13 and pins flash-attn, so we vendor it and copy the modules.
+
+All four are cloned into `docs/vendor` (gitignored, `just vendor` to reclone); the lighter three are editable path deps.
 - tinymfv — https://github.com/wassname/tinymfv. Eval on the moral-foundations auth vs care axis, plus coherence metrics `p_ans_any` (best), `json_is_valid`, `ppx_json`.
 - Related, for positioning: Fierro and Roger, "Steering Language Models with Weight Arithmetic", arXiv:2511.05408 — https://arxiv.org/abs/2511.05408, code https://github.com/safety-research/weight-steering. Weight steering edits weights directly using the difference between two fine-tuned models. No coherence measurement, no KL, no iteration.
 
@@ -81,7 +83,7 @@ Third uncertainty: over rounds, does the auth axis increase monotonically (same 
 - Internalisation: `cos(v_student, v_teacher)` per round.
 - Budget: track cumulative KL vs the iso-KL ~1.7 nat prior.
 
-Gate UAT: `results/u3_loop.png`, three stacked panels sharing a round axis (auth shift, coherence, the two cosines), see /tufte-viz. Pass if auth increases monotonically and coherence stays above the floor for >=3 rounds.
+Gate UAT: `results/index.html`, the ported w2schar Care-vs-Authority plotly map (one node per round, trajectory across the auth axis) plus a coherence and direction-cosine panel sharing the round axis, see /tufte-viz. Pass if auth increases monotonically and coherence stays above the floor for >=3 rounds.
 
 ## Algorithm (pseudopy)
 
