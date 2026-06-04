@@ -22,6 +22,11 @@ def _kl_per_pos(logp_a, logp_b):  # KL(a || b) summed over vocab, per position
     return (logp_a.exp() * (logp_a - logp_b)).sum(-1)
 
 
+def _gnorm(grads) -> float:  # L2 norm of a flat concat of (possibly None) param grads
+    sq = sum(float(g.pow(2).sum()) for g in grads if g is not None)
+    return sq ** 0.5
+
+
 def _encode(tok, prompt: str, completion: str, max_len: int, device):
     ids = tok(prompt + completion, return_tensors="pt", truncation=True, max_length=max_len).to(device)
     prompt_ids = tok(prompt, return_tensors="pt").input_ids[0].to(device)
@@ -58,7 +63,12 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
     logger.info(f"SHOULD: nll (SFT) falls as the adapter learns the trait; kl (barrier div) is 0 for "
                 f"reg=nll/wd and >0 for kl_rev/kl_fwd; gnorm finite (not exploding). loss = nll + lam*relu(kl-tau). "
                 f"If kl stays < tau={cfg.tau} the barrier NEVER fired and {cfg.reg} == nll (no regularisation).")
-    logger.info("  step   nll↓    kl  loss↓  gnorm")
+    logger.info(
+        "SHOULD (barrier balance): g_bar/g_nll is the gradient-pressure ratio (||∇barrier|| / ||∇sft||). "
+        ">>1 -> barrier dominates, it is undoing the trait the SFT installs (over-tight: lower lam or raise tau); "
+        "~1 -> balanced; 0 -> barrier inert (kl<tau, or reg=nll/wd where decay acts in the optimiser, not the loss)."
+    )
+    logger.info("  step   nll↓    kl  g_nll  g_bar  g_bar/g_nll  loss↓  gnorm")
     pbar = tqdm(total=n_steps, desc=f"heal[{cfg.reg}]", mininterval=120, maxinterval=120)
     step = 0
     nlls = []  # per-step SFT loss; final = mean of last 5, the heal-stage number for the round table
@@ -90,15 +100,24 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
                 div = _kl_per_pos(logp[mask], logp0[mask]).mean()
             else:
                 div = torch.zeros((), device=model.device)  # nll, wd
-            loss = sft + cfg.lam * torch.relu(div - cfg.tau)
+            barrier = cfg.lam * torch.relu(div - cfg.tau)
+            loss = sft + barrier
             nlls.append(sft.item())
+            log_now = step % max(1, n_steps // 20) == 0 or step == n_steps - 1
+            if log_now:
+                # split the gradient pressure: ||∇sft|| vs ||∇barrier|| (retain_graph -> still .backward below).
+                # barrier has no grad path when kl<=tau (relu zeroed), so guard before autograd.grad.
+                g_nll = _gnorm(torch.autograd.grad(sft, params, retain_graph=True, allow_unused=True))
+                barrier_live = barrier.requires_grad and (div - cfg.tau).item() > 0
+                g_bar = _gnorm(torch.autograd.grad(barrier, params, retain_graph=True, allow_unused=True)) if barrier_live else 0.0
+                pressure = g_bar / g_nll if g_nll > 0 else float("nan")
             loss.backward()
             gnorm = torch.nn.utils.clip_grad_norm_(params, 1.0)
             opt.step()
             opt.zero_grad()
-            if step % max(1, n_steps // 20) == 0 or step == n_steps - 1:
+            if log_now:
                 logger.info(f"  {step:4d}  {sft.item():5.2f}  {div.detach().item():4.2f}  "
-                            f"{loss.item():5.2f}  {float(gnorm):5.1f}")
+                            f"{g_nll:5.1f}  {g_bar:5.1f}  {pressure:11.2f}  {loss.item():5.2f}  {float(gnorm):5.1f}")
             pbar.set_postfix(nll=f"{sft.item():.2f}", kl=f"{div.detach().item():.2f}", gn=f"{float(gnorm):.1f}")
             pbar.update(1)
             step += 1

@@ -21,7 +21,7 @@ from steer_heal.eval import evaluate_model
 from steer_heal.filter import filter_completions, ppl_under_base
 from steer_heal.heal import heal_round
 from steer_heal.io import append_result, log_event, make_run_dir
-from steer_heal.plot import write_map
+from steer_heal.plot import write_map, write_trajectory
 from steer_heal.steering import generate_plain, generate_steered, gpu_mem, teacher_vec
 from steer_heal.ws.bake import baked
 
@@ -71,20 +71,21 @@ def _mean_finite(xs, label: str = "ppl") -> float:
     return sum(xs) / len(xs) if xs else float("nan")
 
 
-def _stage_row(rnd, stage: str, m: dict, base_m: dict) -> dict:
-    """One row of the base->steered->healed pareto table. dcoh/dauth = coherence
-    CHANGE per nat of Authority CHANGE vs base (signed): positive = coherence lost
-    while trait gained (both fall), the cost we want low; nan for the base row (0/0)."""
+def _stage_row(stg: dict, base_m: dict) -> dict:
+    """One row of the base->steered->healed pareto table from a stage {round,stage,m}.
+    dcoh/dauth = coherence CHANGE per nat of Authority CHANGE vs base (signed): positive
+    = coherence lost while trait gained (both fall), the cost we want low; nan for base."""
+    m = stg["m"]
     dAuth = m["auth_nats"] - base_m["auth_nats"]
     dCoh = m["coherence"] - base_m["coherence"]
     ratio = dCoh / dAuth if abs(dAuth) > 1e-6 else float("nan")
     # arrows in keys -> render in the table header. dcoh/dauth: lower=better (0 = trait at
     # no coherence cost; >0 = paid coherence; <0 = coherence rose too). coh: hold ~1.0. auth: down=trait.
-    return {"round": rnd, "stage": stage, "dcoh/dauth↓": ratio,
+    return {"round": stg["round"], "stage": stg["stage"], "dcoh/dauth↓": ratio,
             "coh→": m["coherence"], "auth↓": m["auth_nats"], "care": m["care_nats"]}
 
 
-def _log_stage_table(stage_rows: list[dict]) -> None:
+def _log_stage_table(stages: list[dict], base_m: dict) -> None:
     from tabulate import tabulate
     logger.info(
         "\nstage pareto (base -> steered -> healed, per round):\n"
@@ -92,7 +93,7 @@ def _log_stage_table(stage_rows: list[dict]) -> None:
         "         coh→ = p_any_ans coherence (hold ~1.0)   auth↓ = log p[Authority] (DOWN = trait)   care = log p[Care] (off-target)\n"
         "  WIN: healed keeps steered's low auth (trait) but recovers coh toward base AND a smaller dcoh/dauth than steered.\n"
         "  UNDO: healed auth springs back to ~base while coh recovers -> heal removed the trait, not just the incoherence.\n"
-        + tabulate(stage_rows, headers="keys", tablefmt="github", floatfmt=".3f") + "\n")
+        + tabulate([_stage_row(s, base_m) for s in stages], headers="keys", tablefmt="github", floatfmt=".3f") + "\n")
 
 
 def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
@@ -104,7 +105,7 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     # trait), not just coherence. One extra eval per run.
     logger.info(f"\n=== EVAL base [tinymfv classic] gpu {gpu_mem()} ===")
     base_m = evaluate_model(model, tok, cfg)
-    stage_rows = [_stage_row("-", "base", base_m, base_m)]  # pareto table: base -> steered -> healed
+    stages = [{"round": "-", "stage": "base", "m": base_m}]  # base -> steered -> healed, for table + trajectory plot
     for rnd in range(cfg.n_rounds):
         logger.info(f"\n\n=== ROUND {rnd} [{cfg.model.split('/')[-1]} reg={cfg.reg}] gpu {gpu_mem()} ===")
         # extract teacher vector + sweep-generate steered data from the CURRENT student
@@ -119,6 +120,7 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
             logger.info(f"\n=== EVAL steered [c={cfg.alphas[0]}] gpu {gpu_mem()} ===")
             with v(model, C=c_op):
                 m_steer = evaluate_model(model, tok, cfg)
+        log_event(run_dir, stage="steered_eval", round=rnd, c=cfg.alphas[0], **m_steer)  # persist for offline plot
         # filter under the ORIGINAL (no history, no steering) -- this picks the usable C
         logger.info(f"\n=== FILTER [{len(comps)} completions] gpu {gpu_mem()} ===")
         kept, scored = filter_completions(model, tok, comps, cfg)
@@ -153,15 +155,17 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
                "adapter_ppl": adapter_ppl, "n_comps": len(comps), "n_kept": len(kept),
                "heal_nll": heal_nll}
         rounds.append(rec)
-        stage_rows.append(_stage_row(rnd, "steered", m_steer, base_m))
-        stage_rows.append(_stage_row(rnd, "healed", m, base_m))
+        stages.append({"round": rnd, "stage": "steered", "m": m_steer})
+        stages.append({"round": rnd, "stage": "healed", "m": m})
         log_event(run_dir, stage="round", **rec)
         logger.info(f"round {rnd}: auth_nats↓={m['auth_nats']:+.2f} care_nats={m['care_nats']:+.2f} "
                     f"coh→={m['coherence']:.3f} cos_v0={cos_v0:+.2f} adapter_ppl={adapter_ppl:.0f}")
 
     _log_loop_summary(rounds, base_m)
-    _log_stage_table(stage_rows)
+    _log_stage_table(stages, base_m)
     write_map(run_dir, rounds)
+    png = write_trajectory(run_dir, stages)
+    logger.info(f"trajectory plot: {png}  (and {png.with_suffix('.html')})")
     return rounds[-1]
 
 
