@@ -1,0 +1,47 @@
+[project]
+name = "steer_heal"
+version = "0.1.0"
+description = "Distil an activation steering vector into a LoRA, heal the incoherency with a KL-to-original barrier, then loop."
+requires-python = ">=3.11"
+dependencies = [
+    "torch",
+    "transformers",
+    "datasets",
+    "einops",
+    "jaxtyping",
+    "beartype",
+    "loguru",
+    "polars",
+    "tabulate",
+    "tyro",
+    "tqdm",
+    "numpy",
+    "wandb",
+    "matplotlib",
+    "baukit",
+    # wassname building blocks (added via uv add git+...; see [tool.uv.sources])
+    "steering-lite",
+    "iso-kl-steering-calibration",
+    "tinymfv",
+    "w2schar-mini",
+]
+
+[tool.uv.sources]
+steering-lite = { git = "https://github.com/wassname/steering-lite" }
+iso-kl-steering-calibration = { git = "https://github.com/wassname/isokl_steering_calibration" }
+tinymfv = { git = "https://github.com/wassname/tinymfv" }
+w2schar-mini = { git = "https://github.com/wassname/w2schar-mini" }
+baukit = { git = "https://github.com/davidbau/baukit.git" }
+
+[tool.ruff.lint]
+ignore = ["F722"]  # jaxtyping shape strings
+
+[tool.uv]
+exclude-newer = "5 days"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

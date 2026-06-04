@@ -1,31 +1,34 @@
+# steer-heal-love
 
-Experiment, I found https://r.jina.ai/https://arxiv.org/html/2606.00995v1 interesting
+Hypothesis: you can distill a steering vector into LoRA weights and "heal" the incoherency the vector injects by regularising the training (KL to base, or weight decay). Then loop and see what multiple rounds give you.
 
-- they don't use pairs completions, just one
-- they don't measure incoherency but they could
+The crux: KL-to-base penalises all drift, persona shift included. The bet is that incoherency drift is large and erratic while the persona shift is small and systematic, so KL kills the incoherency preferentially. If that's wrong, we just trade persona strength for coherence instead of getting both.
 
-```md
-It's interesting how they used steering vectors as an internal perturbation, to generate synthetic data. This is what weight steering did too. I reckon you could "heal" the incoherency by training on the outputs with kl or weight decay. Then it would be interesting what multiple rounds give you. 
+## Source
 
-It's similar to weight steering, but you use kl or wd not the direction between two adapters. 
+Found this interesting: https://r.jina.ai/https://arxiv.org/html/2606.00995v1
 
-Another interesting thing, so this paper they only used one direction it seems. So from base to pos, not from neg to pos.
-```
+They use steering vectors as an internal perturbation to generate synthetic data, which is what weight steering does too. But:
 
-So my idea here
+- they use single completions, not pairs
+- they don't measure incoherency (they could)
+- they only use one direction: base to pos, not neg to pos
 
-- get positive persona  e.g. pos = "you do not defer to authority and instead stick to principle no matter your involvement"
-- generate vec using the distance from hs_base to hs_pos (hidden states) (this is normal mean mass contrastive steering , see my reference repo https://github.com/wassname/steering-lite)
-- Generate completions using this vector
-  - filter our ones that have the persona in, or are incoherent (as much as we can)
-  - (we might be able to dial down the vector for long trajectories, could we even backtrack an incoherent vector and replay parts with less intervention? or just cosine gating at test time)
-- Train a lora on these completions, could be just 50 completions, and 2 epochs. Now the trick we want to make this self healing where any unfiltered incoherency is self healing. We can try
-  - nl kl or wd regularisation, making sure the output or distribution or  weights don't shift too much (should hopefully penalise the incoherent ones esp over long trajectory)
-- bake in lora adapter (actually we can do this on the fly, making in all prev lora adapters on load, this is more elegent)
-- eval checkpoint on https://github.com/wassname/tinymfv
-- if it works loop: we could even do this online! GRPO style looping each batch or iteratitive... iteratitive is simpler at first.
+So this is similar to weight steering, except you heal with KL or WD instead of taking the direction between two adapters.
 
-Now we plot the tinymfv progress over time on the auth vs care axis. and we have a subplot showing a coherent measure (we have a few from tinymfv p_ans_any (best), json_is_valid, ppx_json)
+## Method
 
+1. Pick a positive persona, e.g. `pos = "you do not defer to authority and instead stick to principle no matter your involvement"`.
+2. Build the steering vector from the distance `hs_base -> hs_pos` (hidden states). This is normal mean-mass contrastive steering, see my reference repo https://github.com/wassname/steering-lite.
+3. Generate completions with this vector.
+   - Drop completions that are incoherent, or that verbalise the trait instead of enacting it (we want the model to act it out, not narrate "I am someone who..."). Filter as much as we can.
+   - We might be able to dial the vector down for long trajectories. Could we even backtrack an incoherent vector and replay parts with less intervention? Or just cosine-gate at test time.
+4. Train a LoRA on these completions, could be just 50 completions and 2 epochs. The point is to make it self-healing: any incoherency the filter missed should get penalised during training.
+   - Regularise with KL or WD so the outputs, distribution, or weights don't shift too far from base. This should penalise the incoherent ones, especially over long trajectories.
+5. Bake in the LoRA adapter. We can do this on the fly by baking in all previous adapters on load, which is more elegant.
+6. Eval the checkpoint on https://github.com/wassname/tinymfv.
+7. If it works, loop. We could even do this online, GRPO-style per batch, or iteratively. Iterative is simpler to start.
 
-now does this make sense and can you read /humanizer and clean it up please
+## Eval
+
+Plot the tinymfv progress over time on the auth vs care axis, with a subplot for a coherence measure. tinymfv gives a few: `p_ans_any` (best), `json_is_valid`, `ppx_json`.
