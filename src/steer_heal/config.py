@@ -43,8 +43,13 @@ class RunConfig:
     min_train: int = 20  # assert at least this many kept completions, else steering/filter starved
     gen_max_new_tokens: int = 256
     max_len: int = 1024
+    # repetition is incoherence the ppl filter CANNOT see (looped text is low-ppl = predictable), so
+    # stop it at generation, not post-hoc: penalty softly discourages all repeats, no_repeat_ngram
+    # hard-blocks any trigram repeat (kills "instead their instead their" loops at the source).
+    repetition_penalty: float = 1.3
+    no_repeat_ngram_size: int = 3
     ppl_tau: float = 50.0  # drop completions with ppl-under-original above this
-    rep_tau: float = 0.3  # drop completions whose max n-gram repeat fraction exceeds this
+    rep_tau: float = 0.3  # drop completions whose max n-gram repeat fraction exceeds this (residual net)
 
     # ── heal (U2): one objective + divergence-to-ORIGINAL barrier ──
     reg: Literal["nll", "kl_fwd", "kl_rev", "wd"] = "kl_rev"

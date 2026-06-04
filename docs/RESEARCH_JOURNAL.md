@@ -443,3 +443,163 @@ provisional; coherence and qualitative carry the Gate 1 claim.
 that actually moves the target). (2) Metric infra: wire steering-lite's loading-weighted Delta-logit
 auth_sep (results.py / aggregate_flips) instead of my 7-way-logp mean, OR robustify to median. Plan B1
 (super_sspace/sspace) if still broad; recorded in spec.
+
+## 2026-06-04 (d) -- the "phantom-KL init bug" was a WRONG diagnosis (init is fine); trait still does not transfer
+
+**Introduction.** I claimed the heal had two bugs: (1) barrier KL starting at ~0.6 before training,
+blamed on a non-zero LoRA B init, and (2) train SFT loss not descending, blamed on beta2=0.999. The
+user pushed back (scout mindset): mean=1e-4 std=1e-4 B init is within normal range, and "you only have
+confirmation if it learns". On checking, claim (1) is REFUTED and claim (2) is unconfirmed. The
+question that actually matters is unchanged: why does a fit adapter not move the trait? Continues
+entry (a) and the task4/task10 data-ceiling hypothesis.
+
+**Methods.** Commit `f280a67`, gemma-3-4b-it, reg=kl_rev, seed 42, 1 round, n_prompts 16, tinymfv
+classic eval (think_tokens 128). The commit BUNDLED five changes (a mistake, see Discussion): LoRA
+init B=normal(mean=1e-4)->B=0, betas (0.9,0.999)->(0.9,0.95), cosine-with-warmup (0.1) schedule,
+r 8->32 / alpha 64 / layer_range (0.0,1.0)->(0.2,0.8), epochs 2->6, plus a new per-epoch val nll.
+The decisive evidence is NOT from #79 but from #78's verbose log (`logs/20260604T172126_verbose.log`,
+OLD init), which lets me read the round-0 step-0 KL the init claim hinges on.
+
+**Results.**
+
+| epoch | train_nll | val_nll |
+|-------|-----------|---------|
+| 0     | 1.710     | 1.365   |
+| 1     | 1.162     | 1.417   |
+| 3     | 0.931     | 1.201   |
+| 5     | 0.806     | 1.240   |
+
+Table 1. Per-epoch mean SFT nll on the 42 train completions and the 6 held-out val completions, heal
+round 0, run #79. train_nll falls monotonically; val_nll wanders ~1.2-1.4 (n=6, noisy).
+
+| stage   | auth_nats | coherence |
+|---------|-----------|-----------|
+| base    | -2.354    | 0.996     |
+| steered | -3.517    | 0.992     |
+| healed  | -2.464    | 0.999     |
+
+Table 2. tinymfv trait (auth_nats, log marginal blame-mass on Authority, DOWN = more trait) and
+coherence (p_ans_any) at the three pipeline stages of round 0, run #79. coh_cost = |dCoh|/|dAuth| =
+0.027, not surgical (dCare=+0.28 moved more than dAuth=-0.11).
+
+Provenance:
+- Commit: `f280a67` (heal init/schedule/betas/val fixes).
+- Run command (#79): `PYTHONUNBUFFERED=1 STEER_ATTN_IMPL=eager uv run python -m steer_heal.run --reg kl_rev --n-rounds 1 --n-prompts 16`
+- Run dir: `out/20260604T194133_gemma-3-4b-it_kl_rev_s42/` (events.jsonl, ckpt/r0.safetensors).
+- Log: `pueue log 79 --full`; Table 1 cells are the `epoch N: train_nll=.. val_nll=..` lines; Table 2
+  base/steered are the stage-pareto table, healed is the `round 0:` line and `eval:` auth_nats=-2.46.
+- REFUTATION of the init claim: #78 round-0 heal (OLD init B=normal, NO baked history), verbose log
+  `heal_round:119` rows: step 0 nll=1.90 **kl=0.00**, step 4 kl=0.21, step 8 kl=0.33, step 12 kl=0.80.
+  KL is ~0 at init with the old init, then RISES as SFT installs the trait. So the init did not produce
+  a phantom KL. The kl=0.64-at-step-0 the user pasted was ROUND 5 (line 1653 sits between ROUND 5 at
+  1367 and ROUND 6 at 1709), i.e. five rounds of baked history = real cross-round drift, which is what
+  the barrier is meant to measure. B=0 is harmless and standard but fixed nothing.
+- train_nll did descend in #79 (1.71->0.81) but this is UNATTRIBUTED (5 changes bundled) and #78 never
+  logged per-epoch train_nll, so "loss was not descending" was never actually established -- it was a
+  read of bs=1 per-step noise.
+
+Healed auth_nats moves only -0.11 from base (-2.354 to -2.464) in #79, vs steered -3.517. #78 r0 healed
+was -2.69. Both small, both near base, metric noisy (emitted_close=0/264). The changes did not improve
+trait transfer.
+
+**Discussion (speculative).** I made the classic ml-debug error: pattern-matched a symptom (KL>0 at
+step 0) to a tidy mechanism (bad init), committed a fix, and declared victory without the isolating
+measurement. The user caught it. The measurement (#78 round-0 step-0 kl=0.00, old init) refutes the
+init story outright; the 0.64 was baked history. The premise behind the second claim (loss not
+descending) was never measured at epoch level either. Net: I changed five things, can attribute
+nothing, and the only metric that matters (trait transfer) is unchanged. What IS supported, by the
+structural-ceiling lens: fixing optimiser-side knobs did not move the trait, so the trait is not
+optimiser-limited -- it is the data (filter keeps near-base completions, entries a/(diag_heal)) or the
+parameterisation/eval. Genuinely open between those.
+
+**Next.** (1) The discriminating test is overfit-one-batch on a KNOWN trait-laden completion: can the
+adapter reproduce defiant-of-authority text (expressiveness) AND does tinymfv then read the trait
+(data/eval)? That splits data-ceiling from can't-express/can't-see. (2) #80 clean 10-round is running;
+reframed, it tests whether the stall persists (it is NOT a fix validation). (3) Do not bundle changes
+again; ablate one at a time if attribution matters. (4) lam retune still parked.
+
+## 2026-06-04 (e) -- barrier-strength sweep: the heal barrier only throttles the trait and buys no coherence at the coherent dose; nll (no barrier) is best
+
+**Introduction.** Entry (d) left it open whether the trait fails to transfer because the kept data is
+near-base (data ceiling) or because the barrier suppresses it. The user pushed on this: "you haven't
+even tried wd and kl values?". So I re-healed ONE run's cached kept completions (the 48 from #79) with
+the SAME LoRA-A init seed, varying ONLY the regulariser (reg, lam, tau). Same data + same init means
+the only thing that can move healed auth_nats is the barrier. Pre-registered: outcome 1 = monotone
+weaker-barrier -> more-trait (the barrier throttles); outcome 2 = all dAuth ~ 0 incl nll (data
+ceiling); outcome 3 = inconclusive. Continues entry (a)/(d).
+
+**Methods.** Commit `f280a67`, gemma-3-4b-it, seed 42 (`torch.manual_seed(cfg.seed)` per config so the
+A-init is identical), 6 epochs, lr 1e-4 cosine+warmup, lora r=32 alpha=64 layers (0.2,0.8). Re-heal
+harness `scripts/diag_barrier.py` reads #79's `events.jsonl` gen event, keeps the 48 keep==True
+completions, re-trains a fresh adapter per config, bakes it, runs tinymfv (think_tokens 128). Three
+families across three pueue runs: #82 kl_rev with the tau=0.5 hinge, #86 kl_rev with tau=0 (pure linear
+barrier = lam*div, the w2s form), #85 weight-decay decades 0.1..100. Base auth_nats=-2.354, coh=0.996.
+
+**Results.**
+
+| reg / family    | strength | dAuth | coh   | heal_nll |
+|-----------------|----------|-------|-------|----------|
+| nll (no barrier)| 0        | -1.247| 1.000 | 0.199    |
+| kl_rev linear   | 0.03     | -1.053| 0.999 | 0.204    |
+| kl_rev linear   | 0.10     | -0.664| 1.000 | 0.232    |
+| kl_rev linear   | 0.30     | -0.173| 0.999 | 0.471    |
+| kl_rev linear   | 1.00     | -0.141| 1.000 | 0.970    |
+
+Table 1. Pure-linear kl_rev barrier (tau=0), #86. `strength` = lam, the barrier weight. dAuth =
+healed auth_nats minus base (more negative = more trait retained; DOWN = more trait). coh = p_ans_any.
+heal_nll = converged SFT loss (last-5-step mean). Trait falls monotonically as the barrier strengthens;
+heal_nll rises in step (the barrier is fighting the SFT objective); coh never leaves ~1.0.
+
+| reg | weight_decay | dAuth | coh   |
+|-----|--------------|-------|-------|
+| nll | 0            | -1.247| 1.000 |
+| wd  | 0.1          | -1.247| 1.000 |
+| wd  | 1.0          | -1.247| 1.000 |
+| wd  | 3.0          | -1.247| 1.000 |
+| wd  | 10.0         | -1.247| 1.000 |
+| wd  | 30.0         | -1.251| 0.999 |
+| wd  | 100.0        | -0.519| 1.000 |
+
+Table 2. AdamW decoupled weight decay on the adapter, #85. (The log table also prints a tau column;
+it is meaningless for wd and is dropped here.) dAuth is byte-identical to nll up to wd=30, then halves
+at wd=100. coh never leaves ~1.0.
+
+Provenance:
+- Commit: `f280a67`. Harness: `scripts/diag_barrier.py <run_dir> <mode>` (modes barrier/tau0/wd).
+- Source data: `out/20260604T194133_gemma-3-4b-it_kl_rev_s42/events.jsonl`, the 48 keep==True
+  completions of the gen event (entry (d)'s #79).
+- Run commands: #82 `... diag_barrier.py out/...s42/ barrier`; #86 `... barrier` ... `tau0`; #85 `... wd`.
+- Logs / cells: each dAuth/coh is the `<reg> strength=.. : auth=.. (dAuth=..) coh=..` line and the
+  end-of-log `barrier sweep (re-heal #79 ...)` table. #86 `pueue log 86 --full`; #85 `pueue log 85
+  --full`; #82 `pueue log 82 --full`. #85 runs older code that prints `lam=`/`tau=` instead of
+  `strength=`; values are unaffected.
+- #82 hinge (tau=0.5) for cross-reference: nll -1.247, kl_rev lam 0.03 -0.93 / 0.1 -0.40 / 0.3 -0.17 /
+  1.0 -0.17; lam 0.3 tau 1.0 -0.31 (raising tau weakens it); wd 0.01 and 0.1 byte-identical to nll.
+
+Outcome 1 holds, decisively and in triplicate: weaker barrier -> more trait, monotone, across the kl
+hinge (#82), the kl linear form (#86), and weight decay (#85). nll retains the full -1.247 at coh
+1.000; every barrier strictly reduces |dAuth| while leaving coherence at ~1.0.
+
+**Discussion (speculative).** My read: at this (coherent) operating dose the barrier is pure cost. It
+removes trait and never buys coherence, because coherence was already ~1.0 with no barrier, so the
+relu(div-tau) penalty has nothing to fix and only pulls the adapter back toward the original. The two
+non-kl families converge on the same story by different mechanisms: wd just shrinks the whole adapter
+toward no-op (hence the knee only appears at wd=100, where per-step decoupled shrink lr*wd=1e-2
+compounds to ~0.92x per step over 252 steps and finally bites), and the kl barrier pulls the output
+distribution back toward base. Neither is a selective incoherence-cleaner here; both are volume knobs
+on the adapter. This refutes the data-ceiling reading of entries (a)/(d) for THIS data: nll reaching
+dAuth=-1.247 (it even exceeds the steered teacher's -1.16 of #79) proves the 48 kept completions carry
+plenty of trait. The earlier negative heals (task4/10/19) all ran lam=1.0, i.e. the right-hand end of
+Table 1 where the trait is throttled to ~-0.14. The big caveat: this is the COHERENT dose, where the
+barrier can only hurt. Its hypothesised value is the coherence-breaking dose (filter off, or a higher
+C) where nll WOULD lose coherence and the barrier might pay for itself; that is untested here.
+Alternative hypothesis I cannot yet exclude: n=1 per cell, so a +-0.1 nat seed wobble could fake part
+of the monotone tail (though the trend spans >1 nat across 5 points, far beyond plausible single-seed
+noise). Distinguished by the 3-seed repeat (task25).
+
+**Next.** (1) Launched the paired 10-round to test the loop, same seed 42: #87 nll (barrier off,
+control) and #88 kl_rev lam=0.1 tau=0 (gentle active barrier, 53% trait single-round). The loop is the
+one place cumulative incoherence can appear, so it is where the barrier might finally earn its place;
+the contrast is whether nll's coherence decays over rounds while #88's holds. (2) 3-seed noise floor on
+the headline (task25). (3) The real barrier test remains filter-off at a coherence-breaking dose
+(task11/22), still parked.

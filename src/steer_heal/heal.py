@@ -14,7 +14,7 @@ import torch
 from loguru import logger
 from torch.nn import functional as F
 from tqdm import tqdm
-from transformers import get_cosine_schedule_with_warmup
+from transformers import BatchEncoding, get_cosine_schedule_with_warmup
 
 from steer_heal.config import RunConfig
 from steer_heal.ws.adapter import ModulatedLoRA
@@ -31,20 +31,16 @@ def _gnorm(grads) -> float:  # L2 norm of a flat concat of (possibly None) param
 
 
 def _encode(tok, prompt: str, completion: str, max_len: int, device):
-    ids = tok(prompt + completion, return_tensors="pt", truncation=True, max_length=max_len).to(device)
-    prompt_ids = tok(prompt, return_tensors="pt").input_ids[0].to(device)
+    # Tokenize prompt and completion SEPARATELY then concatenate the ids, so the prompt is always a
+    # clean token-prefix -- no BPE merge can span the boundary (which would silently shift the SFT
+    # mask by a token). prompt keeps generation's tokenization (add_special_tokens default, matching
+    # generate_steered's tok(text)); the completion adds no specials. Truncation keeps the FRONT.
+    prompt_ids = tok(prompt, return_tensors="pt").input_ids[0]
+    comp_ids = tok(completion, return_tensors="pt", add_special_tokens=False).input_ids[0]
+    input_ids = torch.cat([prompt_ids, comp_ids])[:max_len].unsqueeze(0).to(device)
     n_prompt = prompt_ids.shape[0]
-    L = ids.input_ids.shape[1]
-    # Assert the prompt tokenizes as a clean PREFIX of prompt+completion. If a BPE merge spans
-    # the boundary, n_prompt is wrong and the SFT mask silently shifts by a token. Truncation
-    # keeps the FRONT (whole prompt + partial completion), so check the overlap that survives --
-    # min(n_prompt, L). This always runs, including the max_len boundary the earlier guard skipped
-    # (external review: a merge at exactly max_len escaped the < max_len check).
-    n_check = min(n_prompt, L)
-    assert torch.equal(ids.input_ids[0, :n_check], prompt_ids[:n_check]), (
-        "prompt is not a token-prefix of prompt+completion (BPE boundary merge); "
-        "the SFT loss mask would be misaligned by a token."
-    )
+    L = input_ids.shape[1]
+    ids = BatchEncoding({"input_ids": input_ids, "attention_mask": torch.ones_like(input_ids)})
     tgt_is_completion = torch.arange(1, L, device=device) >= n_prompt  # mask over next-token targets
     return ids, tgt_is_completion
 
@@ -101,7 +97,10 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
         ">>1 -> barrier dominates, it is undoing the trait the SFT installs (over-tight: lower lam or raise tau); "
         "~1 -> balanced; 0 -> barrier inert (kl<tau, or reg=nll/wd where decay acts in the optimiser, not the loss)."
     )
-    logger.info("  step   nll↓    kl  g_nll  g_bar  g_bar/g_nll  loss↓  gnorm")
+    logger.info("  step   nll↓    kl  g_nll  g_bar  g_bar/g_nll  loss↓  gnorm        lr")
+    # init val nll BEFORE any training = the baseline; epoch val nlls only mean something against it.
+    # With B=0 the fresh adapter is a no-op, so this should equal the base model's nll on val.
+    logger.info(f"  epoch init: train_nll=  nan  val_nll={_val_nll(model, tok, val_kept, hist_specs, lora, cfg):.3f}  lr={sched.get_last_lr()[0]:.1e}")
     pbar = tqdm(total=n_steps, desc=f"heal[{cfg.reg}]", mininterval=120, maxinterval=120)
     step = 0
     nlls = []  # per-step SFT loss; final = mean of last 5, the heal-stage number for the round table
@@ -146,6 +145,7 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
                 barrier_live = barrier.requires_grad and (div - cfg.tau).item() > 0
                 g_bar = _gnorm(torch.autograd.grad(barrier, params, retain_graph=True, allow_unused=True)) if barrier_live else 0.0
                 pressure = g_bar / g_nll if g_nll > 0 else float("nan")
+                cur_lr = sched.get_last_lr()[0]  # lr applied to THIS step (before sched.step below)
             loss.backward()
             gnorm = torch.nn.utils.clip_grad_norm_(params, 1.0)
             opt.step()
@@ -153,7 +153,7 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
             opt.zero_grad()
             if log_now:
                 logger.info(f"  {step:4d}  {sft.item():5.2f}  {div.detach().item():4.2f}  "
-                            f"{g_nll:5.1f}  {g_bar:5.1f}  {pressure:11.2f}  {loss.item():5.2f}  {float(gnorm):5.1f}")
+                            f"{g_nll:5.1f}  {g_bar:5.1f}  {pressure:11.2f}  {loss.item():5.2f}  {float(gnorm):5.1f}  {cur_lr:.2e}")
             pbar.set_postfix(nll=f"{sft.item():.2f}", kl=f"{div.detach().item():.2f}", gn=f"{float(gnorm):.1f}")
             pbar.update(1)
             step += 1
