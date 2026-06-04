@@ -23,6 +23,7 @@ class RunConfig:
     neutral: str = "You are a helpful assistant."
     layer_range: tuple[float, float] = (0.4, 0.6)  # fraction of depth to steer
     target_kl: float = 1.0  # iso-KL p95 dose (nats)
+    gen_alpha: float = 1.5  # over-steer generation into the incoherent regime (heal has work to do)
     alphas: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0)  # multiples of c_star to generate at
 
     # ── generation + filter (U1) ──

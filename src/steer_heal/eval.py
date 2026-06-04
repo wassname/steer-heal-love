@@ -24,17 +24,21 @@ def evaluate_model(model, tok, cfg: RunConfig) -> dict:
         device=model.device,
     )
     prof = rep["profile"]  # pandas: foundation, human, model, model_T
-    model_p = dict(zip(prof["foundation"], prof["model"]))
-    # SHOULD: auth/care in [0,1], coherence ~ base level on a working model;
-    # a sharp coherence drop after steering = format collapse. On tiny-random
-    # the numbers are junk (we test the path, not the value).
+    p = dict(zip(prof["foundation"], prof["model"]))
+    # The trait "less deference to authority" moves SocialNorms DOWN and Care UP
+    # on gemma-3-1b-it (Authority is degenerate ~0; see RESEARCH_JOURNAL 2026-06-04).
+    # Report all foundations so we never lose the axis that actually moves.
+    # SHOULD: under steering, socialnorms drops and care rises; coherence holds.
     out = {
-        "auth": float(model_p["Authority"]),
-        "care": float(model_p["Care"]),
+        "socialnorms": float(p["SocialNorms"]),  # trait axis: DOWN = more trait
+        "care": float(p["Care"]),                # trait axis: UP = more trait
+        "auth": float(p["Authority"]),
+        "fairness": float(p["Fairness"]),
+        "liberty": float(p["Liberty"]),
         "coherence": float(rep["mean_pmass_allowed"]),
         "ppx_json": float(math.exp(rep["mean_nll_json"])),
         "top1_acc": float(rep["top1_acc"]),
     }
-    logger.info(f"eval: auth={out['auth']:.3f} care={out['care']:.3f} "
+    logger.info(f"eval: socialnorms={out['socialnorms']:.3f} care={out['care']:.3f} "
                 f"coherence={out['coherence']:.3f} ppx={out['ppx_json']:.1f}")
     return out

@@ -67,7 +67,7 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         # extract teacher vector + generate steered data from the CURRENT student
         with baked(model, hist_specs):
             v = teacher_vec(model, tok, cfg)
-            comps = generate_steered(model, tok, v, alpha=1.0, cfg=cfg)
+            comps = generate_steered(model, tok, v, alpha=cfg.gen_alpha, cfg=cfg)
         # filter under the ORIGINAL (no history, no steering)
         kept, scored = filter_completions(model, tok, comps, cfg)
         log_event(run_dir, stage="gen", round=rnd, n_comps=len(comps), n_kept=len(kept), scored=scored)
@@ -87,7 +87,7 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         rec = {"round": rnd, **m, "cos_v0": cos_v0, "c_star": float(v.cfg.coeff), "n_kept": len(kept)}
         rounds.append(rec)
         log_event(run_dir, stage="round", **rec)
-        logger.info(f"round {rnd}: auth={m['auth']:.3f} care={m['care']:.3f} "
+        logger.info(f"round {rnd}: socialnorms={m['socialnorms']:.3f} care={m['care']:.3f} "
                     f"coh={m['coherence']:.3f} cos_v0={cos_v0:+.2f}")
 
     map_path = write_map(run_dir, rounds)

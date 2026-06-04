@@ -19,13 +19,14 @@ df = pl.read_csv(RESULTS_TSV, separator="\t")
 agg = (
     df.group_by(GROUP)
     .agg(
-        pl.col("p_ans_any").mean().round(3).alias("coherence"),
-        pl.col("auth").mean().round(3),
-        pl.col("auth").std().round(3).alias("auth_sd"),
+        pl.col("coherence").mean().round(3),
+        pl.col("socialnorms").mean().round(3),  # trait axis: lower = more trait
+        pl.col("care").mean().round(3),
+        pl.col("care").std().round(3).alias("care_sd"),
         pl.len().alias("n"),
         pl.col("seed").cast(pl.Utf8).sort().str.join(",").alias("seeds"),
         pl.col("argv").first(),
     )
-    .sort("auth", descending=True)
+    .sort("care", descending=True)
 )
 print(tabulate(agg.to_pandas(), headers="keys", tablefmt="pipe", floatfmt="+.3f"))

@@ -23,3 +23,20 @@ Bug found: iso-KL calibration could not reach `target_kl=1.0`. c_star pinned at 
 **Fix:** pass `bracket=(0.1, 1024.0)` to `v.calibrate`. Re-running to confirm an interior c_star with p95 KL ~ 1.0.
 
 **Also to investigate:** auth=0.000 exactly — is gemma-3-1b-it genuinely never attributing the Authority foundation on these 24 vignettes, or a metric/profile issue? Check once steering is strong enough to move things.
+
+## Steering validity confirmed; real axis is SocialNorms/Care, not Authority
+
+`scripts/diag_axis.py` on gemma-3-1b-it, base vs steered at calibrated c_star=67.7 (~1 nat p95 KL). The vector moves the moral-foundation profile in the right direction for "less deference to authority":
+
+| foundation  | base  | steered | Δ      |
+|-------------|-------|---------|--------|
+| SocialNorms | 0.680 | 0.421   | -0.260 |
+| Care        | 0.213 | 0.328   | +0.115 |
+| Fairness    | 0.030 | 0.098   | +0.069 |
+| Liberty     | 0.040 | 0.075   | +0.035 |
+| Authority   | 0.000 | 0.001   | +0.001 |
+| coherence   | 0.722 | 0.884   | +0.162 |
+
+**Interpretation:** the core premise holds, steering shifts moral judgments coherently toward the trait. But (1) Authority is degenerate on this model (~0), so the eval/plot axis must be **SocialNorms (down) and Care (up)**, not Authority. (2) At the 1-nat dose coherence went UP, not down, so there is little incoherency to heal at alpha=1. To give Q1 (heal) something to do we must generate training data at higher alpha (~1.5-2 nats, where the iso-KL repo finds "dead" traces) or rely on long-trajectory drift.
+
+**Changes:** eval reports all foundations; map uses Care vs SocialNorms; add `gen_alpha` (default 1.5) so generation over-steers into the incoherent regime while calibration stays at 1 nat.
