@@ -69,6 +69,13 @@ class RunConfig:
     # the two are identical (no history yet); they only differ from round 1 on.
     barrier_ref: Literal["base", "prev"] = "prev"
     lam: float = 0.3  # kl-barrier weight (reg=kl_*); ignored for nll. 0.3 = coherence peak of the #98/#99 ladder (unimodal in lam, peaks 0.1-0.3, 1.0 over-tight); 0.3 = most trait at the peak
+    # round-ramped barrier: lam_eff = lam * (1 + round)**lam_round_pow. 0 = constant (every round same lam).
+    # >0 grows the barrier with round to oppose the COMPOUNDING coherence drift under barrier_ref=prev: each
+    # round adds ~constant divergence and they accumulate, so by round ~7 the baked adapter degenerates into
+    # token loops (#101 journal h: coh 0.99->0.62, "BUILDUTEutive" soup that the ppl/rep filter can't catch).
+    # A growing barrier holds later rounds closer to their predecessor. Trades final trait depth for more
+    # coherent rounds (the barrier can't tell coherence-drift from trait-drift). 0.5 = sqrt(round) ramp.
+    lam_round_pow: float = 0.0
     tau: float = 0.5  # barrier engages only when divergence > tau (nats)
     weight_decay: float = 0.0  # AdamW decoupled decay on the adapter; per-step shrink ~ lr*weight_decay
     # spectral_lam: independent ALWAYS-ON operator-norm penalty on ΔW (σ_max via power iteration), a

@@ -104,10 +104,16 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
     sched = get_cosine_schedule_with_warmup(
         opt, num_warmup_steps=int(cfg.warmup_ratio * n_steps), num_training_steps=n_steps)
 
+    # round-ramped barrier (config.lam_round_pow): round index = len(hist_specs) (R adapters baked = round R).
+    # lam_round_pow=0 -> lam_eff==lam (constant, no behaviour change). >0 grows the barrier with round.
+    rnd = len(hist_specs)
+    lam_eff = cfg.lam * (1 + rnd) ** cfg.lam_round_pow
+
     # streaming training table (token-efficient-logging): one row, columns self-decode below.
     logger.info(f"heal[{cfg.reg}] {len(train_kept)} train (+{len(val_kept)} val) x {cfg.epochs} ep = {n_steps} steps; "
                 f"lora r={cfg.lora_r} a={cfg.lora_alpha} on layers {cfg.layer_range}; "
-                f"lr={cfg.lr} cosine warmup={cfg.warmup_ratio} betas={cfg.adam_betas}")
+                f"lr={cfg.lr} cosine warmup={cfg.warmup_ratio} betas={cfg.adam_betas}; "
+                f"lam_eff={lam_eff:.3f} (lam {cfg.lam} x (1+round={rnd})^{cfg.lam_round_pow})")
     logger.info("SHOULD (val): train_nll falls each epoch (SFT fits the kept data); val_nll falls then "
                 "flattens. If val_nll RISES while train falls -> overfit (fewer epochs / lower r). If "
                 "NEITHER falls -> data is near-base (nothing to distil) or the optimiser is broken.")
@@ -159,7 +165,7 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
                 div = _kl_per_pos(logp[mask], logp0[mask]).mean()
             else:
                 div = torch.zeros((), device=model.device)  # nll
-            barrier = cfg.lam * torch.relu(div - cfg.tau)
+            barrier = lam_eff * torch.relu(div - cfg.tau)
             # spectral_lam: independent ALWAYS-ON operator-norm cap on ΔW (σ_max), composes with the
             # output-space barrier above and with weight_decay (see config.RunConfig.spectral_lam).
             # Folded into `barrier` so the g_bar/g_nll gradient-pressure log captures it too.
