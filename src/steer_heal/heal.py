@@ -25,6 +25,28 @@ def _kl_per_pos(logp_a, logp_b):  # KL(a || b) summed over vocab, per position
     return (logp_a.exp() * (logp_a - logp_b)).sum(-1)
 
 
+def _spectral_div(lora, n_iter: int = 3) -> torch.Tensor:
+    """Mean operator norm σ_max(ΔW) over the adapter's layers, ΔW = (alpha/r)·B@A.
+
+    Power iteration (u,v held constant) gives σ_max = uᵀ(B@A)v, differentiable in A,B.
+    This is the weights-space analog of weight_decay: wd penalises ||ΔW||_F (sum of all
+    singular values squared), spectral_norm penalises ||ΔW||_2 (the LARGEST singular value),
+    i.e. it caps how much the update can stretch any single input direction. Used with tau=0
+    so relu(div-0)=div is an always-on penalty (like wd), not a hinge barrier."""
+    scale = lora.cfg.alpha / lora.cfg.r
+    sigmas = []
+    for name in lora.A:
+        A, B = lora.A[name].float(), lora.B[name].float()  # A: r×d_in, B: d_out×r
+        with torch.no_grad():
+            v = torch.randn(A.shape[1], device=A.device)
+            v = v / v.norm()
+            for _ in range(n_iter):
+                u = B @ (A @ v); u = u / (u.norm() + 1e-8)
+                v = A.T @ (B.T @ u); v = v / (v.norm() + 1e-8)
+        sigmas.append(scale * (u @ (B @ (A @ v))))  # u,v const -> grad flows through A,B
+    return torch.stack(sigmas).mean()
+
+
 def _gnorm(grads) -> float:  # L2 norm of a flat concat of (possibly None) param grads
     sq = sum(float(g.pow(2).sum()) for g in grads if g is not None)
     return sq ** 0.5
@@ -77,7 +99,7 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
     lora = ModulatedLoRA(model, r=cfg.lora_r, alpha=cfg.lora_alpha, layer_range=cfg.layer_range)
     params = list(lora.parameters())
     opt = torch.optim.AdamW(params, lr=cfg.lr, betas=cfg.adam_betas,
-                            weight_decay=(cfg.lam if cfg.reg == "wd" else 0.0))
+                            weight_decay=cfg.weight_decay)
     n_steps = len(train_kept) * cfg.epochs
     sched = get_cosine_schedule_with_warmup(
         opt, num_warmup_steps=int(cfg.warmup_ratio * n_steps), num_training_steps=n_steps)
@@ -115,9 +137,13 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
                 pbar.update(1); step += 1
                 continue
 
-            # original reference logits (no history, adapter off) for the barrier
+            # barrier reference logits (this round's adapter OFF). barrier_ref="base" bakes no
+            # history -> ref = round-0 original (leash to base, fights accumulated trait); "prev"
+            # bakes the history -> ref = previous-round student (trust region, penalises only this
+            # round's new divergence so trait accumulates while each step stays coherent).
             if cfg.reg in ("kl_fwd", "kl_rev"):
-                with torch.no_grad(), lora(model, c=0.0):
+                ref_specs = hist_specs if cfg.barrier_ref == "prev" else []
+                with torch.no_grad(), baked(model, ref_specs), lora(model, c=0.0):
                     logp0 = model(**ids).logits[0, :-1].log_softmax(-1)
 
             # student logits: history baked + this round's adapter live
@@ -132,8 +158,13 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
             elif cfg.reg == "kl_rev":
                 div = _kl_per_pos(logp[mask], logp0[mask]).mean()
             else:
-                div = torch.zeros((), device=model.device)  # nll, wd
+                div = torch.zeros((), device=model.device)  # nll
             barrier = cfg.lam * torch.relu(div - cfg.tau)
+            # spectral_lam: independent ALWAYS-ON operator-norm cap on ΔW (σ_max), composes with the
+            # output-space barrier above and with weight_decay (see config.RunConfig.spectral_lam).
+            # Folded into `barrier` so the g_bar/g_nll gradient-pressure log captures it too.
+            if cfg.spectral_lam > 0:
+                barrier = barrier + cfg.spectral_lam * _spectral_div(lora)
             loss = sft + barrier
             nlls.append(sft.item())
             ep_nlls.append(sft.item())
@@ -142,7 +173,7 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
                 # split the gradient pressure: ||∇sft|| vs ||∇barrier|| (retain_graph -> still .backward below).
                 # barrier has no grad path when kl<=tau (relu zeroed), so guard before autograd.grad.
                 g_nll = _gnorm(torch.autograd.grad(sft, params, retain_graph=True, allow_unused=True))
-                barrier_live = barrier.requires_grad and (div - cfg.tau).item() > 0
+                barrier_live = barrier.requires_grad and ((div - cfg.tau).item() > 0 or cfg.spectral_lam > 0)
                 g_bar = _gnorm(torch.autograd.grad(barrier, params, retain_graph=True, allow_unused=True)) if barrier_live else 0.0
                 pressure = g_bar / g_nll if g_nll > 0 else float("nan")
                 cur_lr = sched.get_last_lr()[0]  # lr applied to THIS step (before sched.step below)

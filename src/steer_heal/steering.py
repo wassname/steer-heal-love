@@ -58,32 +58,41 @@ def teacher_vec(model, tok, cfg: RunConfig):
 @torch.no_grad()
 def _gen_one(model, tok, text, cfg):
     ids = tok(text, return_tensors="pt").to(model.device)
+    # gemma-3-it recommended sampling (its generation_config.json): top_k=64, top_p=0.95,
+    # temperature default 1.0. NOT Qwen's top_k=20/presence_penalty -- different model family.
+    # NO repetition_penalty / no_repeat_ngram here ON PURPOSE: a gen-time anti-repetition control
+    # MASKS the over-steering pathology (papers over the loops) so the filter passes junk and
+    # walk-C goes blind to "dose too high". Repetition is detected POST-HOC by the rep_tau filter,
+    # never suppressed at generation. (We tried penalty=1.3: it just inflated ppl and starved the
+    # filter, #96.) Repetition must remain VISIBLE so the filter/controller can act on it.
     gen = model.generate(**ids, max_new_tokens=cfg.gen_max_new_tokens, do_sample=True,
-                         temperature=1.0, top_p=0.95,
-                         repetition_penalty=cfg.repetition_penalty,
-                         no_repeat_ngram_size=cfg.no_repeat_ngram_size,
+                         temperature=1.0, top_p=0.95, top_k=64,
                          pad_token_id=tok.pad_token_id)
     return tok.decode(gen[0, ids.input_ids.shape[1]:], skip_special_tokens=True)
 
 
-def generate_steered(model, tok, v, cfg: RunConfig) -> list[dict]:
+def generate_steered(model, tok, v, cfg: RunConfig, alpha_scale: float = 1.0) -> list[dict]:
     """Sweep cfg.alphas (raw-vector multiples); generate one completion per prompt x alpha.
 
     The filter (Q0), not iso-KL, picks the usable C: low alpha is coherent, high
-    alpha collapses, and we keep the coherent-but-trait-laden ones.
+    alpha collapses, and we keep the coherent-but-trait-laden ones. `alpha_scale`
+    (kappa) is the walk-C dose multiplier: the controller cools it over a round to
+    keep the steered model coherent as the baked adapter accumulates trait.
     """
     out = []
     n_total = cfg.n_prompts * len(cfg.alphas)
-    logger.info(f"\n=== GEN steered [{n_total} = {cfg.n_prompts} prompts x {len(cfg.alphas)} alphas] "
-                f"gpu {gpu_mem()} ===")
+    logger.info(f"\n=== GEN steered [{n_total} = {cfg.n_prompts} prompts x {len(cfg.alphas)} alphas, "
+                f"kappa={alpha_scale:.2f}] gpu {gpu_mem()} ===")
     pbar = tqdm(total=n_total, desc="gen steered", mininterval=120, maxinterval=120)
     for i in range(cfg.n_prompts):
         user = POOL[i % len(POOL)]
         text = chat_prompt(tok, cfg.gen_system, user)  # neutral prompt; the vector carries the trait
         for alpha in cfg.alphas:
-            with v(model, C=alpha * v.cfg.coeff):
+            with v(model, C=alpha * alpha_scale * v.cfg.coeff):
                 comp = _gen_one(model, tok, text, cfg)
-            out.append({"user": user, "prompt": text, "completion": comp, "alpha": float(alpha)})
+            # record the EFFECTIVE alpha (kappa-scaled) so the filter's per-alpha report and the
+            # offline plots reflect the dose the completion actually came from.
+            out.append({"user": user, "prompt": text, "completion": comp, "alpha": float(alpha * alpha_scale)})
             pbar.update(1)
     pbar.close()
     return out

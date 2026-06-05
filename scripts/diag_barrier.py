@@ -95,7 +95,11 @@ logger.info(f"base: auth_nats={base_m['auth_nats']:+.3f} care_nats={base_m['care
 
 rows = []
 for reg, lam, tau in GRID:
-    cfg = dataclasses.replace(base_cfg, reg=reg, lam=lam, tau=tau)
+    # "wd" grid rows are now a weights-space knob, not a reg value: map to reg=nll + weight_decay=lam.
+    if reg == "wd":
+        cfg = dataclasses.replace(base_cfg, reg="nll", lam=0.0, tau=0.0, weight_decay=lam)
+    else:
+        cfg = dataclasses.replace(base_cfg, reg=reg, lam=lam, tau=tau, weight_decay=0.0)
     torch.manual_seed(cfg.seed)  # identical LoRA-A init across barrier values -> only the barrier differs
     lora, spec, heal_nll = heal_round(model, tok, kept, [], cfg)
     with baked(model, [spec]):

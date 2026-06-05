@@ -22,14 +22,32 @@ NARRATE = re.compile(
     re.IGNORECASE,
 )
 
+# refusal / assistant-identity boilerplate (NousResearch finetuning-subnet UNWANTED_PHRASES, trimmed):
+# coherent low-ppl completions that carry no trait and dilute the distillation. Phrases are
+# refusal-SPECIFIC ("i cannot assist") not bare "i cannot", so on-trait defiance ("I cannot stand
+# by while...") is NOT dropped.
+REFUSAL = (
+    "i'm sorry, i can", "i am sorry, i can", "i cannot provide", "i can't provide",
+    "i cannot assist", "i can't assist", "i cannot help with", "i can't help with",
+    "i cannot fulfill", "i cannot comply", "i'm not able to provide", "i am unable to",
+    "i cannot engage", "i must decline", "against my programming",
+    "as an ai", "as a language model", "as an artificial intelligence",
+    "i'm an ai", "i am an ai", "i don't have personal opinions",
+)
+
 
 def rep_frac(text: str) -> float:
-    """Most-repeated 4-gram fraction; ~1.0 means degenerate looping/too short."""
+    """Max most-repeated n-gram fraction over n in {2,3,4}; ~1.0 = degenerate looping/too short.
+    Small n catches SHORT loops ("instead their instead their" = a bigram) that the 4-gram alone
+    missed (#34: that text scored 0.27 on 4-grams, under rep_tau=0.3, and poisoned training)."""
     words = text.split()
-    grams = [tuple(words[i : i + 4]) for i in range(len(words) - 3)]
-    if not grams:
-        return 1.0
-    return Counter(grams).most_common(1)[0][1] / len(grams)
+    best = 0.0
+    for n in (2, 3, 4):
+        grams = [tuple(words[i : i + n]) for i in range(len(words) - n + 1)]
+        if not grams:
+            return 1.0  # too short to score at this n -> treat as degenerate
+        best = max(best, Counter(grams).most_common(1)[0][1] / len(grams))
+    return best
 
 
 @torch.no_grad()
@@ -51,9 +69,10 @@ def filter_completions(model, tok, comps: list[dict], cfg: RunConfig):
     for c in tqdm(comps, desc="filter ppl", mininterval=120, maxinterval=120):
         rf = rep_frac(c["completion"])
         nar = bool(NARRATE.search(c["completion"]))
+        ref = any(p in c["completion"].lower() for p in REFUSAL)
         ppl = ppl_under_base(model, tok, c["prompt"], c["completion"])
-        keep = (ppl < cfg.ppl_tau) and (rf < cfg.rep_tau) and (not nar)
-        scored.append({**c, "ppl": ppl, "rep": rf, "narrates": nar, "keep": keep})
+        keep = (ppl < cfg.ppl_tau) and (rf < cfg.rep_tau) and (not nar) and (not ref)
+        scored.append({**c, "ppl": ppl, "rep": rf, "narrates": nar, "refuses": ref, "keep": keep})
     kept = [s for s in scored if s["keep"]]
     _log_filter_report(scored, cfg)
     return kept[: cfg.n_keep], scored
@@ -112,11 +131,12 @@ def _log_filter_report(scored: list[dict], cfg: RunConfig) -> None:
     n_ppl = sum(s["ppl"] >= cfg.ppl_tau for s in scored)
     n_rep = sum(s["rep"] >= cfg.rep_tau for s in scored)
     n_nar = sum(s["narrates"] for s in scored)
+    n_ref = sum(s["refuses"] for s in scored)
     n_kept = sum(s["keep"] for s in scored)
     logger.info(
         f"filter kept {n_kept}/{len(scored)}. dropped by (overlapping): "
         f"coherence ppl>={cfg.ppl_tau:g}: {n_ppl}, repetition rep>={cfg.rep_tau}: {n_rep}, "
-        f"persona-leak narrate: {n_nar}. "
+        f"persona-leak narrate: {n_nar}, refusal/identity: {n_ref}. "
         f"SHOULD: at high alpha coherence-ppl drops the most (steering breaks fluency). If "
         f"persona-leak dominates, the model is NARRATING the trait not enacting it; if repetition "
         f"dominates, steering collapsed to loops not incoherence."

@@ -50,15 +50,17 @@ One objective, one constraint (per CLAUDE.md loss philosophy):
 - Objective: SFT cross-entropy on the kept steered completions.
 - Constraint: a divergence-to-original barrier, `lambda * relu(D - tau)`, off while we are already within the coherence region so it does not fight the trait for free.
 
-The reference is the original model throughout, not the previous round's student. Anchoring to round 0 resists cumulative drift across the loop (your call, and it matches the iso-KL "~1.7 nat total budget" framing: spend against a fixed origin).
+The barrier reference is `barrier_ref` (config). SETTLED 2026-06-04 (#97, was the original spec call, now reversed): default is `prev` = the previous round's student, NOT the round-0 original. Anchoring to base (`barrier_ref="base"`) leashes the fresh adapter back toward the origin, and because the baked history already carries the accumulated trait, the relu barrier is permanently active and its gradient OPPOSES that trait, so it UNDOES the prior rounds (the external-review "history erasure" risk, confirmed: nll re-heal dAuth_prev=+1.157, kl_rev/base +0.855 = both erode). `prev` penalises only THIS round's new divergence (a trust region), so trait accumulates while each step stays coherent. At round 0 the two are identical (no history yet); they differ from round 1 on.
 
-D is the variable under test (uncertainty 2):
-- `nll`: no regulariser, SFT only. The control.
-- `kl_fwd`: KL(orig || theta), mass-covering, pulls theta to cover the original everywhere, expected to dilute the trait.
-- `kl_rev`: KL(theta || orig), mode-seeking, suppresses tokens improbable under the original (the incoherent ones), expected best.
-- `wd`: weight decay on the adapter only. Cheapest, no original forward pass, no direct output-coherence signal, expected weakest.
+`reg` is the divergence in the LOSS barrier (the variable under test, U2):
+- `nll`: no barrier, SFT only. The control.
+- `kl_fwd`: KL(ref || theta), mass-covering, pulls theta to cover the reference everywhere, expected to dilute the trait.
+- `kl_rev`: KL(theta || ref), mode-seeking, suppresses tokens improbable under the reference (the incoherent ones).
+- `spectral_norm`: penalise σ_max(ΔW), the operator norm of the adapter update (power iteration, tau=0 = always-on). Weights-space, no reference forward pass. Caps how far the update stretches any single input direction (the largest singular value), where wd caps the whole Frobenius volume.
 
-All KLs are teacher-forced from per-position logits over the completion tokens, so no extra sampling. `kl_fwd`/`kl_rev` need original logits per step: toggle the lora-lite adapter off for a no-grad forward, or keep one frozen reference. `wd` needs neither.
+`weight_decay` is an INDEPENDENT AdamW knob (decoupled per-step shrink ~ lr*wd on the adapter), NOT a `reg` choice, so it composes with any of the above. Early #98 finding: wd<=15 is byte-identical to the no-reg control (inert at this adapter scale, because Adam normalises the step to ~O(1) and the decay only competes once wd*|param| ~ O(1), i.e. wd in the tens); the knee is ~30, where it both retains more trait and holds coherence.
+
+All KLs are teacher-forced from per-position logits over the completion tokens, so no extra sampling. `kl_fwd`/`kl_rev` need the reference logits per step: bake the history (ref=prev) or not (ref=base), adapter off, no-grad forward. `spectral_norm`/`nll` need neither.
 
 ## Three uncertainties, each a gate with a UAT
 
@@ -72,9 +74,15 @@ Gate UAT: hand-label ~30-50 steered completions on two axes (coherent? enacts vs
 
 ### U2: can we heal, and which regulariser?
 
-Second uncertainty: at matched trait shift, does any regulariser keep coherence above the `nll` control? Test all four: `nll`, `kl_fwd`, `kl_rev`, `wd`. Prior: `kl_rev > kl_fwd ~ wd > nll`.
+Second uncertainty: which regulariser trades coherence for trait most efficiently? The headline is the SLOPE, not a pass/fail:
 
-Gate UAT: Pareto plot of trait shift (tinymfv auth axis) vs coherence (`p_ans_any`) for all four, at `results/u2_heal_gate.png` (tufte small multiples, shared scale, direct labels, see /tufte-viz). Pass if the best regulariser dominates `nll`, i.e. more coherence at equal trait shift. Read samples too: scores can move for the wrong reason (narration).
+$$\text{cohΔ/authΔ} = \frac{\Delta\text{coh}}{\Delta\text{auth}} \times 100 \quad\text{(centinats of coherence per nat of trait moved)}$$
+
+DIRECTION matters, not magnitude: most-NEGATIVE is best (trait moved AND coherence ROSE = free lunch), then small-positive = cheap, large-positive = trait cost a lot of coherence. Guard the denominator: |dAuth| < 0.05 nats -> blank (a do-nothing config can't fake a good slope on a near-zero denominator).
+
+The operative experiment is the regulariser ablation (`scripts/diag_heal_sweep.py`, run #98+): load the round-0 checkpoint as baked history, re-heal round-1's kept data on top, fix `barrier_ref=prev`, and sweep `reg ∈ {nll, kl_rev, kl_fwd, spectral_norm}` x strength plus `weight_decay ∈ {30,60,120}`, ranked by the cohΔ/authΔ slope. Prior, UPDATED by #82/#98 (was `kl_rev > kl_fwd ~ wd > nll`): the barrier THROTTLES trait and buys little coherence at this operating point (nll is already cheap, coh ~0.995-0.996), so the contest is whether any reg produces a NEGATIVE (free-lunch) slope that beats the nll/wd family rather than just trading trait away. wd is the surprise candidate (knee ~30, holds coherence while moving trait).
+
+Gate UAT: the diag_heal_sweep table (headline-first, sorted best-slope-first) at the journal entry, winner = most-negative-or-smallest cohΔ/authΔ among rows whose dAuth_base is meaningfully negative (trait actually moved, not a blank do-nothing row, not a positive-dAuth undo), at coh >= prev. Read samples too: scores can move for the wrong reason (narration).
 
 ### U3: iterative, coherent, same direction?
 
@@ -151,16 +159,18 @@ def keep(c, orig, tok):                          # U1 filter gate
     coherent = ppl(c, orig) < τ_ppl and rep_ngram(c) < τ_rep and p_ans_any(c) > 0.75
     return coherent and not narrates_trait(c)    # enact, don't narrate
 
-# ── Heal: SFT + divergence-to-ORIGINAL barrier (D ∈ {nll, kl_fwd, kl_rev, wd}) ──
-def train(model, comps, D, λ, τ, epochs=2):
-    opt = AdamW(round_N_params(model), lr=α_lr, weight_decay=(λ if D=="wd" else 0))
+# ── Heal: SFT + barrier. reg ∈ {nll, kl_fwd, kl_rev, spectral_norm}; wd is an independent AdamW knob ──
+# ref = prev student (history baked, this round's adapter off), NOT base -- see Loss section.
+def train(model, comps, reg, λ, τ, wd, epochs=6):
+    opt = AdamW(round_N_params(model), lr=α_lr, weight_decay=wd)   # wd composes with any reg
     for _ in range(epochs):
         for x in comps:                          # x = prompt + steered completion
             with gates(model, C0=1, Cn=1):  logπ = model(x)   # full student (grad on A_N,B_N)
             ℒ_sft = -mean(logπ[x.completion_tokens])
-            if   D=="kl_fwd": div = KL(logπ0(model,x), logπ)[x.completion_tokens].mean()
-            elif D=="kl_rev": div = KL(logπ, logπ0(model,x))[x.completion_tokens].mean()
-            else:             div = 0            # nll, wd
+            if   reg=="kl_fwd":        div = KL(logπ_ref(model,x), logπ)[x.completion_tokens].mean()
+            elif reg=="kl_rev":        div = KL(logπ, logπ_ref(model,x))[x.completion_tokens].mean()
+            elif reg=="spectral_norm": div = σ_max(A_N B_N)     # operator norm, τ=0 -> always-on
+            else:                      div = 0                  # nll
             ℒ = ℒ_sft + λ * relu(div - τ)        # barrier: off while div ≤ τ
             ℒ.backward();  opt.step();  opt.zero_grad()
 
@@ -247,12 +257,12 @@ Fixed (code):
   silently skip) when a kept completion truncates to zero target tokens.
 
 Design risks (NOT fixed, inform the loop + Plan work):
-- Loop barrier undoes its own history (gemini "history erasure", grok, deepseek). KL anchored to
-  the round-0 original while history is baked into the student means by round>=1 the cumulative
-  drift already exceeds tau, so the relu barrier is permanently active and its gradient pushes the
-  fresh adapter to OPPOSE the trait the frozen history installed. Plausibly a dominant cause of the
-  loop undo. -> for U3 consider anchoring the barrier to the PREVIOUS student, or normalising tau by
-  historical drift (supports the "less barrier" direction, task 17).
+- RESOLVED (#97, now `barrier_ref=prev` default): Loop barrier undoes its own history (gemini
+  "history erasure", grok, deepseek). KL anchored to the round-0 original while history is baked into
+  the student means by round>=1 the cumulative drift already exceeds tau, so the relu barrier is
+  permanently active and its gradient pushes the fresh adapter to OPPOSE the trait the frozen history
+  installed. Confirmed and FIXED: anchor the barrier to the PREVIOUS student (`prev`), penalising only
+  this round's new divergence. See the Loss section for the settled call (supports task 17).
 - Barrier mean-dilution (deepseek). div = mean over completion tokens of KL; a few catastrophically
   incoherent tokens are diluted by many in-distribution ones, so the mean stays < tau and kl_rev
   silently == nll. A max or high-quantile KL would penalise localised incoherence. METHOD change
@@ -277,7 +287,7 @@ is the pristine base by construction.
 ## UAT summary (proof, not assertion)
 
 - U1 filter gate: `results/u1_filter_gate.md` — labelled set, scorer separation. Link when done.
-- U2 heal gate: `results/u2_heal_gate.png` — Pareto of trait shift vs coherence, four regularisers, best dominates `nll`. Link.
+- U2 heal gate: the `diag_heal_sweep.py` regulariser-ablation table (headline cohΔ/authΔ×100, sorted best-slope-first), winner = most-negative slope among rows that actually move trait. Link the journal entry + pueue id.
 - U3 loop gate: `results/u3_loop.png` — auth shift, coherence, direction cosines per round; monotone trait, coherence above floor. Link.
 - Samples: first 3 train completions and first 3 eval generations printed in full (prompt + special tokens), confirming enact-not-narrate and correct formatting.
 

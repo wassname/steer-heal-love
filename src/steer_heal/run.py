@@ -96,6 +96,46 @@ def _log_stage_table(stages: list[dict], base_m: dict) -> None:
         + tabulate([_stage_row(s, base_m) for s in stages], headers="keys", tablefmt="github", floatfmt=".3f") + "\n")
 
 
+def gen_filter_walk(model, tok, v, cfg: RunConfig, hist_specs: list) -> tuple[list[dict], list[dict], float, int]:
+    """Adaptive-dose gen+filter (the controller steering.py:65 was written for).
+
+    Walk the dose multiplier kappa DOWN until a batch clears cfg.gen_pass_target filter
+    survival, banking every survivor (never waste a coherent completion), and top up
+    batches until >= cfg.min_train kept. Backing the dose off keeps the steered model
+    coherent so the filter has clean survivors. This attacks the over-steer repetition
+    collapse that starved #90 at round 6 from the GEN side; the heal barrier (lam) attacks
+    the same root cause from the WEIGHT side.
+
+    gen runs under the BAKED history (steered student state); the filter runs under the
+    ORIGINAL (ppl-under-base picks the usable C), so each attempt enters/exits baked
+    around gen only. Returns (kept, scored, kappa_final, n_gen). If max_batches can't reach
+    min_train, the heal assert downstream fires the (now dose-aware) starve canary.
+    """
+    kappa = 1.0
+    kept_all, scored_all, n_gen = [], [], 0
+    for attempt in range(cfg.gen_max_batches):
+        with baked(model, hist_specs):
+            comps = generate_steered(model, tok, v, cfg, alpha_scale=kappa)
+        _, scored = filter_completions(model, tok, comps, cfg)  # OUTSIDE baked = under original
+        passing = [s for s in scored if s["keep"]]  # TRUE pass set (not filter's n_keep-capped return)
+        kept_all.extend(passing)
+        scored_all.extend(scored)
+        n_gen += len(comps)
+        rate = len(passing) / len(comps)  # dose decision uses the real survival rate, not the cap
+        logger.info(
+            f"walk-C attempt {attempt}: kappa={kappa:.2f} kept {len(passing)}/{len(comps)} "
+            f"(rate={rate:.2f}, target>={cfg.gen_pass_target}) -> banked {len(kept_all)}/{cfg.min_train}.\n"
+            "SHOULD: rate climbs as kappa cools; once rate>=target we bank and top up to min_train. "
+            "If rate stays ~0 even at kappa_min, the steered model is incoherent at EVERY dose "
+            "(root cause is upstream of the dose: adapter itself broke, or filter thresholds wrong)."
+        )
+        if len(kept_all) >= cfg.min_train:
+            break
+        if rate < cfg.gen_pass_target and kappa > cfg.gen_kappa_min:
+            kappa *= cfg.gen_kappa_decay  # over-driven -> cool the dose for the next batch
+    return kept_all[: cfg.n_keep], scored_all, kappa, n_gen  # cap training set at n_keep (top-up may overshoot)
+
+
 def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     hist_specs = []      # AdapterSpec per folded round (gated bake history)
     v0_flat = None       # round-0 direction, for the Q3 cosine
@@ -109,23 +149,21 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     stages = [{"round": "-", "stage": "base", "m": base_m}]  # base -> steered -> healed, for table + trajectory plot
     for rnd in range(cfg.n_rounds):
         logger.info(f"\n\n=== ROUND {rnd} [{cfg.model.split('/')[-1]} reg={cfg.reg}] gpu {gpu_mem()} ===")
-        # extract teacher vector + sweep-generate steered data from the CURRENT student
+        # extract teacher vector from the CURRENT student, then walk-C generate+filter:
+        # the controller cools the dose so the steered data stays coherent as the adapter
+        # accumulates trait over rounds (gen baked, filter under original -- see gen_filter_walk).
         with baked(model, hist_specs):
             v = teacher_vec(model, tok, cfg)
-            comps = generate_steered(model, tok, v, cfg)
-            # STEERED-stage eval: the model state the training data came from (history baked,
-            # vector live at the operating dose = lowest/cleanest alpha, NO new adapter). This
-            # is the raw-steering pareto reference the heal must BEAT (same base, trait via
-            # vector vs trait via the distilled adapter).
-            c_op = cfg.alphas[0] * v.cfg.coeff
-            logger.info(f"\n=== EVAL steered [c={cfg.alphas[0]}] gpu {gpu_mem()} ===")
-            with v(model, C=c_op):
+        kept, scored, kappa, n_comps = gen_filter_walk(model, tok, v, cfg, hist_specs)
+        # STEERED-stage eval at the dose the data ACTUALLY came from (kappa-scaled cleanest alpha),
+        # history baked, NO new adapter: the raw-steering pareto reference the heal must BEAT.
+        c_lo = kappa * cfg.alphas[0]
+        logger.info(f"\n=== EVAL steered [c={c_lo:.2f} kappa={kappa:.2f}] gpu {gpu_mem()} ===")
+        with baked(model, hist_specs):
+            with v(model, C=c_lo * v.cfg.coeff):
                 m_steer = evaluate_model(model, tok, cfg)
-        log_event(run_dir, stage="steered_eval", round=rnd, c=cfg.alphas[0], **m_steer)  # persist for offline plot
-        # filter under the ORIGINAL (no history, no steering) -- this picks the usable C
-        logger.info(f"\n=== FILTER [{len(comps)} completions] gpu {gpu_mem()} ===")
-        kept, scored = filter_completions(model, tok, comps, cfg)
-        log_event(run_dir, stage="gen", round=rnd, n_comps=len(comps), n_kept=len(kept), scored=scored)
+        log_event(run_dir, stage="steered_eval", round=rnd, c=c_lo, **m_steer)  # persist for offline plot
+        log_event(run_dir, stage="gen", round=rnd, n_comps=n_comps, n_kept=len(kept), kappa=kappa, scored=scored)
 
         # heal one round on top of the baked history, then fold
         logger.info(f"\n=== HEAL [{cfg.reg}] gpu {gpu_mem()} ===")
@@ -153,8 +191,8 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         v0_flat = vf if v0_flat is None else v0_flat
         cos_v0 = float(cosine_similarity(vf, v0_flat, dim=0))
         rec = {"round": rnd, **m, "cos_v0": cos_v0, "steered_ppl": steered_ppl,
-               "adapter_ppl": adapter_ppl, "n_comps": len(comps), "n_kept": len(kept),
-               "heal_nll": heal_nll}
+               "adapter_ppl": adapter_ppl, "n_comps": n_comps, "n_kept": len(kept),
+               "kappa": kappa, "heal_nll": heal_nll}
         rounds.append(rec)
         stages.append({"round": rnd, "stage": "steered", "m": m_steer})
         stages.append({"round": rnd, "stage": "healed", "m": m})
@@ -175,14 +213,15 @@ def _log_loop_summary(rounds: list[dict], base_m: dict) -> None:
     # One row per round, columns walk the pipeline stages left->right:
     #   GEN -> FILTER -> HEAL -> EVAL. (rec_key, display header) is the single source.
     cols = [("round", "round"),
-            ("n_comps", "gen"), ("n_kept", "filt_kept"),         # GEN -> FILTER
+            ("n_comps", "gen"), ("n_kept", "filt_kept"), ("kappa", "kappa↓"),  # GEN -> FILTER (kappa = walk-C dose)
             ("heal_nll", "heal_nll↓"), ("adapter_ppl", "adapter_ppl↓"),  # HEAL
             ("auth_nats", "auth_nats↓"), ("care_nats", "care_nats"),     # EVAL: target / off-target
             ("coherence", "coherence→"), ("cos_v0", "cos_v0→")]
     logger.info(
         "\nloop columns (pipeline stages L->R: GEN | FILTER | HEAL | EVAL):\n"
-        "         gen = steered completions generated (n_prompts x alphas)\n"
+        "         gen = steered completions generated (n_prompts x alphas, summed over walk-C batches)\n"
         "   filt_kept = completions surviving the coherence/rep/persona filter (-> training set)\n"
+        "      kappa↓ = walk-C dose multiplier the controller settled on (1.0 = nominal; <1 = backed off to dodge over-steer)\n"
         "   heal_nll↓ = converged SFT loss of the heal (last-5 mean)\n"
         " adapter_ppl↓ = ppl-under-original of the no-steering adapter gens (low = coherent/healed)\n"
         "  auth_nats↓ = log(profile p[Authority]), NATS (TARGET: down = less deference)\n"
@@ -248,7 +287,8 @@ def main(cfg: RunConfig) -> None:
     cfg = resolve(cfg)
     torch.manual_seed(cfg.seed)
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
-    slug = f"{cfg.model.split('/')[-1]}_{cfg.reg}_s{cfg.seed}"
+    wd_tag = f"_wd{cfg.weight_decay:g}" if cfg.weight_decay else ""
+    slug = f"{cfg.model.split('/')[-1]}_{cfg.reg}{wd_tag}_s{cfg.seed}"
     run_dir = make_run_dir(ts, slug, cfg)
     logger.info(f"argv cfg: {cfg}")
     model, tok = load_model(cfg.model, getattr(torch, cfg.dtype))

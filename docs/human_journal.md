@@ -75,3 +75,12 @@ you can't) so this is plan D record in spec
   you should think about what you would observe at each gate in the likely possible outcomes
   including subtle ones. then tell me if you measure it and if you see it
   this includes eval results but also qualitative judgmeent from you
+
+
+# 2026-06-05 09:48:37
+
+
+  ▎ Steering is supposed to break coherence. We filter for the coherent-but-trait-laden survivors, then distil them into LoRA with a 
+  ▎ regularizer (wd / kl / maybe spectral norm) that heals the residual incoherence while keeping the trait. It fails if the whole batch is
+  ▎ incoherent, because then SFT just pulls toward incoherence. Walk-C exists to stop that, descend the dose until enough coherent 
+  ▎ survivors exist.

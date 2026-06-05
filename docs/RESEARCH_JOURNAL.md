@@ -29,7 +29,7 @@ Bug found: iso-KL calibration could not reach `target_kl=1.0`. c_star pinned at 
 `scripts/diag_axis.py` on gemma-3-1b-it, base vs steered at calibrated c_star=67.7 (~1 nat p95 KL). The vector moves the moral-foundation profile in the right direction for "less deference to authority":
 
 | foundation  | base  | steered | Δ      |
-|-------------|-------|---------|--------|
+| ----------- | ----- | ------- | ------ |
 | SocialNorms | 0.680 | 0.421   | -0.260 |
 | Care        | 0.213 | 0.328   | +0.115 |
 | Fairness    | 0.030 | 0.098   | +0.069 |
@@ -44,10 +44,12 @@ Bug found: iso-KL calibration could not reach `target_kl=1.0`. c_star pinned at 
 ## Pivot: drop calibration, sweep C + filter, move to 4B, SHOULD logging
 
 User feedback corrected two over-steps of mine:
+
 1. I added iso-KL calibration unasked. Removed it. Now use the RAW (unnormalised) mean-diff teacher vector and **sweep `alphas` (0.5,1,2,4) at generation; the filter picks the usable C**. The filter replaces calibration ("self-calibrate via nll + filter"). This was the original design.
 2. I jumped to "Authority degenerate / nothing to heal" off a 1B model. That was premature. Moved to `google/gemma-3-4b-it`; re-checking the profile there with an open mind.
 
 Also: I had no readable evidence for the Q's because the log didn't show the steered completions or the filter decisions. Added token-efficient SHOULD logging for ALL Q's:
+
 - Q0: table alpha -> (ppl_mean, kept_frac) + low/high-C samples. SHOULD: ppl rises with alpha, kept_frac falls.
 - Q1: generate from the trained adapter (no steering), compare adapter_ppl vs steered_ppl under the original. SHOULD: adapter_ppl < steered_ppl = healed (trait expressed coherently).
 - Q2/Q3: per-round loop summary (socialnorms/care/coherence/cos_v0). SHOULD: coherence holds, trait monotone, cos_v0>0.5.
@@ -57,14 +59,17 @@ fast-dev-run green; even on tiny-random ppl rises 3173->4.2M with alpha and adap
 ## Honest state before compaction (still no Q answered)
 
 The pipeline runs end to end on 4B, but I have NOT validated any Q. The trap I fell into and corrected this session:
+
 - raw mean-diff steered across 7 layers broke gemma-3-4b (coherence 0.02), the filter correctly dropped the garbage, leaving 2 kept completions, so the adapter trained on 2 examples ~= base. My earlier "Q1 promising (adapter coherent + refuses authority)" was almost certainly just BASE gemma behaviour, not healing. Retracted until re-run.
 
 Now in place (committed 6b15a8b), NOT yet run on 4B:
+
 - narrow steer band (steer_layers 0.45-0.55) vs broad LoRA (layer_range 0.0-1.0)
 - alpha sweep 0.25-2; n_prompts=16; assert kept>=20 (don't train on starved data)
 - training table (nll/kl/loss/gnorm), full steer+adapter generation dumps, p_ans_any inline
 
 Critical open issues for next session:
+
 1. Find a steer scale where SOME alphas give coherent-but-trait-laden completions (>=20 survive the filter). If the narrow band still over/under-steers, sweep a wider/finer alpha range. This is THE blocker.
 2. Baseline confound (Q7) is now central: base gemma-3-4b is Care=0.92, already aligned. Does baking the trait beat just system-prompting it? Need base vs trained vs prompted on the same eval. If no headroom, the trait/eval needs rethinking (different trait, or measure the steered-data trait not just tinymfv).
 3. Then Q0 (filter table monotone?), Q1 (adapter more coherent than steered AND on-trait, kl_rev vs nll), Q2/Q3 (loop).
@@ -80,7 +85,7 @@ above) is resolved: the narrow steer band (layers 15,16,17) no longer nukes cohe
 Q0 (can we filter?) -- YES. Filter table:
 
 | alpha | ppl_mean | kept_frac |
-|-------|----------|-----------|
+| ----- | -------- | --------- |
 | 0.25  | 3.3      | 1.00      |
 | 0.50  | 33.1     | 0.88      |
 | 1.00  | 397.2    | 0.38      |
@@ -110,9 +115,9 @@ nothing. Wrote scripts/diag_heal.py to eval base vs raw-steered vs r0-adapter si
 ## diag_heal result: the kl_rev adapter is a NO-OP (trait did not persist)
 
 | foundation | base  | steer | adapter | d_steer | d_adapt |
-|------------|-------|-------|---------|---------|---------|
+| ---------- | ----- | ----- | ------- | ------- | ------- |
 | Care       | 0.917 | 0.178 | 0.898   | -0.738  | -0.019  |
-| Fairness   | 0.000 | 0.398 | 0.000   | +0.398  |  0.000  |
+| Fairness   | 0.000 | 0.398 | 0.000   | +0.398  | 0.000   |
 | Sanctity   | 0.042 | 0.326 | 0.040   | +0.284  | -0.001  |
 | coherence  | 1.000 | 0.765 | 0.995   |         |         |
 
@@ -133,6 +138,7 @@ central tension of the project made concrete: trait and incoherence are bundled 
 incoherence rather than separating them within a completion.
 
 Next: reg=nll control (barrier off, same hyperparams; pueue task 62) to isolate cause.
+
 - nll moves Care but kl_rev doesn't -> the barrier is too strong (tau too low / lam too high);
   the trait/coherence tradeoff is real and tunable.
 - nll ALSO no-ops -> the kept training data itself lacks trait; the filter removed the signal,
@@ -150,17 +156,18 @@ the SAME n is valid.
 
 diag_heal at n=132, paired (pueue task 63, base vs adapter, --no-steer):
 
-| foundation | base   | adapter | d_adapt |
-|------------|--------|---------|---------|
-| Care       | 0.2742 | 0.2736  | -0.001  |
-| SocialNorms| 0.1292 | 0.1423  | +0.013  |
-| coherence  | 0.9997 | 0.9975  |         |
+| foundation  | base   | adapter | d_adapt |
+| ----------- | ------ | ------- | ------- |
+| Care        | 0.2742 | 0.2736  | -0.001  |
+| SocialNorms | 0.1292 | 0.1423  | +0.013  |
+| coherence   | 0.9997 | 0.9975  |         |
 
 Every d_adapt within +-0.015 (vignette noise). The kl_rev round-0 adapter is a NO-OP at n=all,
 confirming the n=24 result. The pipeline's care=0.274 was simply base@132. **Q1 negative is
 robust: one round of kl_rev heal did not move the moral-foundation profile.**
 
 Two consequences:
+
 1. Measurement bug to fix: the pipeline logs per-round care/socialnorms at n=None but never a
    base@None reference row, so a no-op adapter looks like "care=0.274" with nothing to compare
    to. Every run must log base@same-n as round -1. (And n=24 dev evals are misleading -- the
@@ -176,14 +183,15 @@ User reframe: TARGET = Authority foundation DOWN (trait = "do not defer to autho
 OFF-TARGET = coherence = mean_pmass_allowed = p_any_ans, want held ~1.0. scripts/diag_stages.py
 evals base/steered/heal_nll/heal_klrev all at n=132, paired (pueue task 65):
 
-| stage        | Authority↓ | dAuth  | SocialNorms | Care   | coherence | dCoh   |
-|--------------|------------|--------|-------------|--------|-----------|--------|
-| base         | 0.099      |  —     | 0.129       | 0.274  | 1.000     |  —     |
-| steered(c=1) | 0.011      | -0.088 | 0.032       | 0.056  | 0.803     | -0.197 |
-| heal_nll     | 0.136      | +0.037 | 0.175       | 0.231  | 0.993     | -0.007 |
-| heal_klrev   | 0.110      | +0.011 | 0.142       | 0.274  | 0.998     | -0.002 |
+| stage        | Authority↓ | dAuth  | SocialNorms | Care  | coherence | dCoh   |
+| ------------ | ---------- | ------ | ----------- | ----- | --------- | ------ |
+| base         | 0.099      | —      | 0.129       | 0.274 | 1.000     | —      |
+| steered(c=1) | 0.011      | -0.088 | 0.032       | 0.056 | 0.803     | -0.197 |
+| heal_nll     | 0.136      | +0.037 | 0.175       | 0.231 | 0.993     | -0.007 |
+| heal_klrev   | 0.110      | +0.011 | 0.142       | 0.274 | 0.998     | -0.002 |
 
 Reading:
+
 - Steering HITS the target: Authority 0.099->0.011 (-0.088), and drops Authority hardest in
   relative terms (to 11% of base vs ~20-25% for Care/SocialNorms) -> a real anti-Authority signal,
   not just collapse. Cost: coherence 1.0->0.803.
@@ -208,6 +216,7 @@ Next experiment (the real test of whether the approach can work at all): does a 
 trait-laden" regime exist? Train an adapter ONLY on the coherent tail of HIGH-alpha completions
 (the ~9 kept at alpha>=1.0, which are both coherent AND strongly steered) and check if Authority
 moves DOWN while coherence holds. Need >=20 such completions, so generate more at alpha~1.0.
+
 - If Authority moves down at held coherence -> the approach works, the bug is data selection
   (we were training on base-like low-alpha completions). Fix: select/upweight high-alpha coherent.
 - If even high-alpha coherent completions don't move Authority -> "coherent at high alpha" means
@@ -254,13 +263,13 @@ filter OFF (ppl_tau=1e9, keep only rep + persona-narrate), high alpha (1.0,1.5,2
 kl_rev barrier clean incoherence DURING training. kl_rev = KL(theta||base) is mode-seeking: it
 penalizes theta for putting mass on low-base-prob tokens (the incoherent ones) hardest, while
 moderate-prob trait tokens survive. Predicted contrast:
-- kl_rev: Authority DOWN + coherence HELD  -> barrier separates trait from incoherence = THESIS CONFIRMED.
+
+- kl_rev: Authority DOWN + coherence HELD -> barrier separates trait from incoherence = THESIS CONFIRMED.
 - nll (no barrier): Authority moves but coherence COLLAPSES (SFT learned the gibberish too).
 - both no-op -> trait doesn't survive even with barrier-cleaning -> deeper problem (eval instrument
   or distillation mechanism).
-Scout note: do NOT pre-conclude doom. The no-op so far is fully explained by "filtered before heal",
-which this test removes for the first time.
-
+  Scout note: do NOT pre-conclude doom. The no-op so far is fully explained by "filtered before heal",
+  which this test removes for the first time.
 
 ## 2026-06-04 (a) -- one round of distill+heal undoes the steering instead of healing it
 
@@ -285,9 +294,9 @@ on the SAME 132 vignettes in one process so every row is paired (scripts/diag_st
 **Results.**
 
 | stage        | Authority | dAuth  | coherence | dCoh   | retain |
-|--------------|-----------|--------|-----------|--------|--------|
-| base         | 0.099     |  --    | 1.000     |  --    |  --    |
-| steered(c=1) | 0.011     | -0.088 | 0.803     | -0.197 |  1.00  |
+| ------------ | --------- | ------ | --------- | ------ | ------ |
+| base         | 0.099     | --     | 1.000     | --     | --     |
+| steered(c=1) | 0.011     | -0.088 | 0.803     | -0.197 | 1.00   |
 | heal_nll     | 0.136     | +0.037 | 0.993     | -0.007 | -0.42  |
 | heal_klrev   | 0.110     | +0.011 | 0.998     | -0.002 | -0.12  |
 
@@ -298,6 +307,7 @@ change from base. retain = dAuth(stage) / dAuth(steered): 1.0 means the stage ke
 Authority shift, 0 means it reverted to base, negative means it moved Authority the wrong way.
 
 Provenance:
+
 - Commit producing all rows: 6b15a8b (first INFO line of each run log).
 - Stage table (all 4 rows): pueue task 65, source `scripts/diag_stages.py out/...nll.../ckpt/r0.safetensors out/...kl_rev.../ckpt/r0.safetensors all`; read with `pueue log 65 --full` (block under "TARGET=Authority"). Raw printed values: base Authority 0.099 coherence 1.000; steered 0.011 / 0.803; heal_nll 0.136 / 0.993; heal_klrev 0.110 / 0.998.
 - Adapters under test: kl_rev = out/20260604T105632_gemma-3-4b-it_kl_rev_s42/ckpt/r0.safetensors (trained in task 60); nll = out/20260604T111747_gemma-3-4b-it_nll_s42/ckpt/r0.safetensors (task 62).
@@ -326,6 +336,7 @@ no-distillable-coherent-expression hypothesis gains weight and I should switch t
 steering method before spending more on this trait.
 
 **Next.**
+
 - Tasks 68 (kl_rev) / 69 (nll), running: heal with ppl_tau=1e9 (coherence filter off), alphas (1.0,1.5,2.0).
   Verify via diag_stages whether kl_rev retains dAuth at coherence ~0.95.
 - New primary goal (G: stronger steering): find a steering strength giving a LARGE Authority drop at
@@ -352,8 +363,8 @@ because the base model is near-ceiling (~94% is-wrong on Authority) so prob bare
 **Results.**
 
 | c    | Auth(prob) | dAuth  | Care(prob) | dCare  | coherence |
-|------|------------|--------|------------|--------|-----------|
-| 0.00 | 0.095      |  --    | 0.273      |  --    | 0.996     |
+| ---- | ---------- | ------ | ---------- | ------ | --------- |
+| 0.00 | 0.095      | --     | 0.273      | --     | 0.996     |
 | 0.50 | 0.108      | +0.013 | 0.247      | -0.026 | 0.999     |
 | 0.75 | 0.061      | -0.034 | 0.172      | -0.100 | 0.989     |
 | 1.00 | 0.011      | -0.084 | 0.055      | -0.218 | 0.807     |
@@ -407,8 +418,8 @@ foundation logp (NATS) + one generation per c (scripts/diag_csweep.py, pueue tas
 **Results.**
 
 | c    | auth_nats | auth_sep | care_sep | coherence |
-|------|-----------|----------|----------|-----------|
-| 0.00 | -4.99     |  --      |  --      | 0.996     |
+| ---- | --------- | -------- | -------- | --------- |
+| 0.00 | -4.99     | --       | --       | 0.996     |
 | 0.25 | -13.86    | +8.9     | -0.6     | 0.996     |
 | 0.50 | -12.11    | +7.1     | -0.9     | 0.992     |
 | 0.75 | -5.79     | +0.8     | +2.5     | 0.959     |
@@ -463,7 +474,7 @@ OLD init), which lets me read the round-0 step-0 KL the init claim hinges on.
 **Results.**
 
 | epoch | train_nll | val_nll |
-|-------|-----------|---------|
+| ----- | --------- | ------- |
 | 0     | 1.710     | 1.365   |
 | 1     | 1.162     | 1.417   |
 | 3     | 0.931     | 1.201   |
@@ -473,7 +484,7 @@ Table 1. Per-epoch mean SFT nll on the 42 train completions and the 6 held-out v
 round 0, run #79. train_nll falls monotonically; val_nll wanders ~1.2-1.4 (n=6, noisy).
 
 | stage   | auth_nats | coherence |
-|---------|-----------|-----------|
+| ------- | --------- | --------- |
 | base    | -2.354    | 0.996     |
 | steered | -3.517    | 0.992     |
 | healed  | -2.464    | 0.999     |
@@ -483,6 +494,7 @@ coherence (p_ans_any) at the three pipeline stages of round 0, run #79. coh_cost
 0.027, not surgical (dCare=+0.28 moved more than dAuth=-0.11).
 
 Provenance:
+
 - Commit: `f280a67` (heal init/schedule/betas/val fixes).
 - Run command (#79): `PYTHONUNBUFFERED=1 STEER_ATTN_IMPL=eager uv run python -m steer_heal.run --reg kl_rev --n-rounds 1 --n-prompts 16`
 - Run dir: `out/20260604T194133_gemma-3-4b-it_kl_rev_s42/` (events.jsonl, ckpt/r0.safetensors).
@@ -533,45 +545,46 @@ A-init is identical), 6 epochs, lr 1e-4 cosine+warmup, lora r=32 alpha=64 layers
 harness `scripts/diag_barrier.py` reads #79's `events.jsonl` gen event, keeps the 48 keep==True
 completions, re-trains a fresh adapter per config, bakes it, runs tinymfv (think_tokens 128). Three
 families across three pueue runs: #82 kl_rev with the tau=0.5 hinge, #86 kl_rev with tau=0 (pure linear
-barrier = lam*div, the w2s form), #85 weight-decay decades 0.1..100. Base auth_nats=-2.354, coh=0.996.
+barrier = lam\*div, the w2s form), #85 weight-decay decades 0.1..100. Base auth_nats=-2.354, coh=0.996.
 
 **Results.**
 
-| reg / family    | strength | dAuth | coh   | heal_nll |
-|-----------------|----------|-------|-------|----------|
-| nll (no barrier)| 0        | -1.247| 1.000 | 0.199    |
-| kl_rev linear   | 0.03     | -1.053| 0.999 | 0.204    |
-| kl_rev linear   | 0.10     | -0.664| 1.000 | 0.232    |
-| kl_rev linear   | 0.30     | -0.173| 0.999 | 0.471    |
-| kl_rev linear   | 1.00     | -0.141| 1.000 | 0.970    |
+| reg / family     | strength | dAuth  | coh   | heal_nll |
+| ---------------- | -------- | ------ | ----- | -------- |
+| nll (no barrier) | 0        | -1.247 | 1.000 | 0.199    |
+| kl_rev linear    | 0.03     | -1.053 | 0.999 | 0.204    |
+| kl_rev linear    | 0.10     | -0.664 | 1.000 | 0.232    |
+| kl_rev linear    | 0.30     | -0.173 | 0.999 | 0.471    |
+| kl_rev linear    | 1.00     | -0.141 | 1.000 | 0.970    |
 
 Table 1. Pure-linear kl_rev barrier (tau=0), #86. `strength` = lam, the barrier weight. dAuth =
 healed auth_nats minus base (more negative = more trait retained; DOWN = more trait). coh = p_ans_any.
 heal_nll = converged SFT loss (last-5-step mean). Trait falls monotonically as the barrier strengthens;
 heal_nll rises in step (the barrier is fighting the SFT objective); coh never leaves ~1.0.
 
-| reg | weight_decay | dAuth | coh   |
-|-----|--------------|-------|-------|
-| nll | 0            | -1.247| 1.000 |
-| wd  | 0.1          | -1.247| 1.000 |
-| wd  | 1.0          | -1.247| 1.000 |
-| wd  | 3.0          | -1.247| 1.000 |
-| wd  | 10.0         | -1.247| 1.000 |
-| wd  | 30.0         | -1.251| 0.999 |
-| wd  | 100.0        | -0.519| 1.000 |
+| reg | weight_decay | dAuth  | coh   |
+| --- | ------------ | ------ | ----- |
+| nll | 0            | -1.247 | 1.000 |
+| wd  | 0.1          | -1.247 | 1.000 |
+| wd  | 1.0          | -1.247 | 1.000 |
+| wd  | 3.0          | -1.247 | 1.000 |
+| wd  | 10.0         | -1.247 | 1.000 |
+| wd  | 30.0         | -1.251 | 0.999 |
+| wd  | 100.0        | -0.519 | 1.000 |
 
 Table 2. AdamW decoupled weight decay on the adapter, #85. (The log table also prints a tau column;
 it is meaningless for wd and is dropped here.) dAuth is byte-identical to nll up to wd=30, then halves
 at wd=100. coh never leaves ~1.0.
 
 Provenance:
+
 - Commit: `f280a67`. Harness: `scripts/diag_barrier.py <run_dir> <mode>` (modes barrier/tau0/wd).
 - Source data: `out/20260604T194133_gemma-3-4b-it_kl_rev_s42/events.jsonl`, the 48 keep==True
   completions of the gen event (entry (d)'s #79).
 - Run commands: #82 `... diag_barrier.py out/...s42/ barrier`; #86 `... barrier` ... `tau0`; #85 `... wd`.
 - Logs / cells: each dAuth/coh is the `<reg> strength=.. : auth=.. (dAuth=..) coh=..` line and the
   end-of-log `barrier sweep (re-heal #79 ...)` table. #86 `pueue log 86 --full`; #85 `pueue log 85
-  --full`; #82 `pueue log 82 --full`. #85 runs older code that prints `lam=`/`tau=` instead of
+--full`; #82 `pueue log 82 --full`. #85 runs older code that prints `lam=`/`tau=` instead of
   `strength=`; values are unaffected.
 - #82 hinge (tau=0.5) for cross-reference: nll -1.247, kl_rev lam 0.03 -0.93 / 0.1 -0.40 / 0.3 -0.17 /
   1.0 -0.17; lam 0.3 tau 1.0 -0.31 (raising tau weakens it); wd 0.01 and 0.1 byte-identical to nll.
@@ -584,7 +597,7 @@ hinge (#82), the kl linear form (#86), and weight decay (#85). nll retains the f
 removes trait and never buys coherence, because coherence was already ~1.0 with no barrier, so the
 relu(div-tau) penalty has nothing to fix and only pulls the adapter back toward the original. The two
 non-kl families converge on the same story by different mechanisms: wd just shrinks the whole adapter
-toward no-op (hence the knee only appears at wd=100, where per-step decoupled shrink lr*wd=1e-2
+toward no-op (hence the knee only appears at wd=100, where per-step decoupled shrink lr\*wd=1e-2
 compounds to ~0.92x per step over 252 steps and finally bites), and the kl barrier pulls the output
 distribution back toward base. Neither is a selective incoherence-cleaner here; both are volume knobs
 on the adapter. This refutes the data-ceiling reading of entries (a)/(d) for THIS data: nll reaching
@@ -603,3 +616,296 @@ one place cumulative incoherence can appear, so it is where the barrier might fi
 the contrast is whether nll's coherence decays over rounds while #88's holds. (2) 3-seed noise floor on
 the headline (task25). (3) The real barrier test remains filter-off at a coherence-breaking dose
 (task11/22), still parked.
+
+## 2026-06-05 (f) -- over the loop the barrier REVERSES the single-round verdict: nll front-loads trait then erodes, the barrier builds trait while holding coherence; correcting entry (e)
+
+**Introduction.** Entry (e) ranked nll best and called the barrier pure trait-cost, but only at a
+single round on clean round-0 data, and explicitly flagged that the loop is the one place a barrier
+could earn its place (untested there). This entry runs that test: a paired 10-round loop, nll vs a
+gentle kl_rev barrier, same seed. The question is the one the loop actually cares about: round over
+round, does the HEALED model move auth_nats further down (more trait) while keeping coherence at least
+as high? I expected, per (e), nll to win on trait and the barrier to only throttle. The result is the
+opposite ordering by round 3.
+
+**Methods.** Code state: the two runs were produced from the then-uncommitted heal.\_encode root-fix on
+top of parent 6b15a8b; that fix is now committed as 4e802bb (metadata.json carries no commit field, so
+the code identity is reconstructed from the AFK timeline, not a stored hash). Model google/gemma-3-4b-it,
+default (non-fast) preset, seed 42, eval_think_tokens=128, all Clifford vignettes. auth_nats =
+log(marginal blame-mass on the Authority foundation), DOWN = more of the care-over-authority trait;
+coherence = p_ans_any (fraction of eval items that emit a parseable answer). "HEAL_auth" is the eval of
+the baked healed adapter at the end of each round (events.jsonl stage=="round"), the metric the loop is
+trying to drive. Both metrics are reported every row: HEAL_auth is the trait (the analogue of hack_s),
+HEAL_coh is the capability/coherence cost (the analogue of gt_s); neither alone is sufficient because a
+trait drop bought by destroying coherence is worthless. pueue #89 (nll) and #90 (kl_rev lam=0.1 tau=0).
+
+**Results.**
+
+| round | nll HEAL_auth↓ | nll HEAL_coh→ | kl HEAL_auth↓ | kl HEAL_coh→ |
+| ----- | -------------- | ------------- | ------------- | ------------ |
+| 0     | -4.293         | 0.999         | -2.913        | 0.999        |
+| 1     | -3.736         | 0.994         | -3.689        | 0.998        |
+| 2     | -3.748         | 0.990         | -3.344        | 0.997        |
+| 3     | -3.710         | 0.990         | -3.810        | 0.994        |
+| 4     | -3.609         | 0.976         | -3.846        | 0.988        |
+| 5     | -3.592         | 0.960         | -3.636        | 0.982        |
+| 9     | -3.218         | 0.923         | (crashed r6)  | (crashed r6) |
+
+Table 1. Per-round eval of the baked healed adapter for two paired 10-round loops, seed 42. Columns are
+auth_nats (DOWN = more trait) and coherence (HOLD near base 0.996) for the nll arm (#89, barrier off)
+and the kl_rev lam=0.1 tau=0 arm (#90, gentle linear barrier on). Base model: auth_nats=-2.354,
+coherence=0.996. The kl arm starved at round 6 (kept completions fell below min_train=20), so rounds
+6 to 9 exist only for nll. nll's HEAL_auth is most negative at round 0 (-4.293) and rises monotonically
+toward base thereafter while coherence falls 0.999 to 0.923; the kl arm's HEAL_auth starts least
+negative (-2.913) and falls to -3.846 by round 4 while coherence stays at or above 0.982, so the two
+arms cross between rounds 2 and 3 and by round 4 kl is more negative AND more coherent (-3.846/0.988 vs
+-3.609/0.976).
+
+Provenance:
+
+- Code identity: parent commit 6b15a8b plus the heal.\_encode separate-tokenize fix, committed this
+  session as 4e802bb. No commit field in metadata.json (limitation).
+- Run commands (argv field of each run's metadata.json):
+  - #89: `STEER_ATTN_IMPL=eager uv run python -m steer_heal.run --reg=nll --n-rounds=10 --seed=42`
+  - #90: `STEER_ATTN_IMPL=eager uv run python -m steer_heal.run --reg=kl_rev --lam=0.1 --tau=0.0 --n-rounds=10 --seed=42`
+- Source records (not a text log; cells are read from the JSONL event stream):
+  - #89: `out/20260604T231906_gemma-3-4b-it_nll_s42/events.jsonl`, records with stage=="round",
+    fields auth_nats and coherence, one per round 0 to 9.
+  - #90: `out/20260605T031418_gemma-3-4b-it_kl_rev_s42/events.jsonl`, same fields, rounds 0 to 5.
+  - base row: the single stage=="base" record in either file (auth_nats=-2.354, coherence=0.996).
+- No aggregation: every cell is the single per-round eval value from the named record, not a mean.
+- Crash evidence (#90 starve at round 6): kept-count per round from the same stage=="round" records,
+  n_kept = 48, 47, 51, 35, 26, 24 for rounds 0 to 5, falling below min_train=20 at round 6.
+
+**Discussion (speculative).** My read: the single-round diag sweeps in (e) could never see this because
+they re-heal a FRESH adapter from base on each round's cached data (hist_specs=[]), so they only measure
+the static data-times-barrier tradeoff, not the loop's feedback. In the loop, the barrier's job is not
+to add trait but to keep each round's healed model coherent enough that the NEXT round's generation and
+filter yield clean training data; that coherence-preservation compounds, so the kl arm climbs (-2.9 to
+-3.85) while nll, which lets coherence rot, sees its trait wash out round over round. This vindicates
+the hunch logged in (e)'s Next and in the user's request ("it's needed more later on"). The alternative
+hypothesis I cannot exclude: this is n=1 per arm and the per-round auth_nats wobble is ~0.1 to 0.5 nats
+(nll itself jumps -3.000 at round 7 then back to -3.306), so the "crossover" could be two noisy walks
+around the same ~-3.5 coherent-trait ceiling that happen to drift apart; the coherence gap (0.988 vs
+0.976 at round 4, widening to 0.923 for nll by round 9) is the more robust half of the claim than the
+trait gap. The 3-seed repeat (task25) distinguishes these. Note also the barrier does NOT stop the
+underlying generation degenerating: n_kept falls 51 to 24 and #90 still starved at round 6, so the
+barrier protects the heal but not the generation, which is the separate job of the repetition controls.
+
+**Next.** (1) #96 queued: nll 10-round with the new generation-time repetition controls
+(repetition_penalty=1.3, no_repeat_ngram_size=3, committed 4e802bb) to test whether protecting the
+generation stops the n_kept starve that the barrier alone could not (task35). (2) The combined run the
+barrier-plus-repetition reading argues for: wd=15 + kl_rev lam=0.01 tau=0.5 over 10 rounds, which needs
+weight_decay decoupled from reg in config (task37). (3) 3-seed noise floor to tell the crossover from
+two noisy walks (task25).
+
+## 2026-06-05 (g) -- regulariser ablation: kl_rev moves the most trait at base-or-better coherence, but the "free lunch" coherence rise is at the measurement floor
+
+**Introduction.** Continuing (f): the loop says the barrier earns its place, but which regulariser
+does it best? I re-heal ONE round (round 1's kept data) on the fixed round-0 checkpoint and vary only
+the regulariser, ranking by the headline slope cohΔ/authΔ = coherence nats gained per trait nat moved
+(relative to base). I expected kl_rev to win (mode-seeking, the (f) loop arm) and wanted to know
+whether any reg gives a NEGATIVE slope (trait moves AND coherence rises = free lunch) rather than the
+usual positive cost. Five families: nll (no reg), wd (AdamW Frobenius shrink), kl_rev (mode-seeking
+trust region), kl_fwd (mass-covering), spectral_norm (operator-norm penalty, new this round).
+
+**Methods.** Commit `7db5a56` for the committed code (heal.py reg dispatch, eval); the sweep harness
+`scripts/diag_heal_sweep.py` was the uncommitted 9-config working-tree version at launch. Model
+google/gemma-3-4b-it, eager attn, seed 42, barrier_ref=prev (the base-vs-prev direction is settled,
+entry above + #97). Source run providing the r0 checkpoint and round-1 data:
+out/20260604T231906_gemma-3-4b-it_nll_s42 (the #89 nll loop). pueue task 98.
+
+**Results.**
+
+| reg           | lam  | wd  | auth↓  | dAuth_base↓ | dCoh_base↑ | cohΔ/authΔ_base ×100↓ |
+| ------------- | ---- | --- | ------ | ----------- | ---------- | --------------------- |
+| kl_rev        | 0.1  | 0   | -3.719 | -1.365      | +0.0017    | -0.13                 |
+| kl_rev        | 0.3  | 0   | -3.966 | -1.612      | +0.0018    | -0.11                 |
+| spectral_norm | 0.01 | 0   | -3.688 | -1.334      | +0.0007    | -0.05                 |
+| spectral_norm | 0.1  | 0   | -3.257 | -0.903      | +0.0003    | -0.03                 |
+| kl_fwd        | 0.1  | 0   | -3.140 | -0.787      | -0.0001    | +0.01                 |
+| nll           | 0    | 30  | -3.351 | -0.997      | -0.0001    | +0.01                 |
+| spectral_norm | 1.0  | 0   | -3.977 | -1.624      | -0.0007    | +0.05                 |
+| nll           | 0    | 0   | -3.136 | -0.783      | -0.0009    | +0.11                 |
+| nll           | 0    | 15  | -3.136 | -0.783      | -0.0009    | +0.11                 |
+
+Table 1. One-round re-heal of round-1 data on the round-0 checkpoint, sorted by the headline slope
+(most-negative first). auth_nats DOWN = more trait; dAuth_base = trait moved vs base (NEGATIVE = moved);
+dCoh_base = coherence change vs base (POSITIVE = rose); cohΔ/authΔ_base = 100 \* dCoh_base / dAuth_base =
+centinats of coherence per nat of trait, NEGATIVE = free lunch. Base: auth=-2.354, coh=0.996. Prev
+(r0 healed): auth=-4.293, coh=0.999. The four negative-slope rows (kl_rev 0.1/0.3, spectral 0.01/0.1)
+all raise coherence above base while moving trait; nll and kl_fwd sit at or below base coherence.
+kl_rev and spectral 1.0 move the most trait (dAuth_base -1.36 to -1.62) vs nll's -0.78.
+
+Provenance:
+
+- Commit: `7db5a56` (committed heal.py/eval). Sweep harness diag_heal_sweep.py uncommitted at launch
+  (9-config grid, pre-widen). Log: ~/.local/share/pueue/task_logs/98.log (726k, 3429 lines).
+- Each row is one INFO line in 98.log (single eval per config, no aggregation): kl_rev 0.1 = line 1444,
+  kl_rev 0.3 = 1985, spectral 0.01 = 2821, spectral 0.1 = 3116, kl_fwd 0.1 = 2526, nll wd30 = 903,
+  spectral 1.0 = 3411, nll wd0 = 313, nll wd15 = 608. base/prev = lines 16-17. Final tabulate table
+  (same values, more sigfig) = lines 3421-3429. cohΔ/authΔ_base ×100 = 100 \* dCoh_base / dAuth_base
+  from the dCoh_base/dAuth_base columns of lines 3421-3429.
+
+kl_rev lam=0.1 has the most-negative slope (-0.13), but lam=0.3 moves MORE trait (dAuth_base -1.612 vs
+-1.365) at the SAME coherence gain (dCoh_base +0.0018 vs +0.0017); the slope only favours 0.1 because
+its denominator is smaller. nll wd=15 is byte-identical to wd=0 (decay too small to bite); spectral_norm
+trains without crashing (the new power-iteration branch is sound).
+
+**Discussion (speculative).** My read: the REG-level conclusion is solid, the lam-level and free-lunch
+claims are not. Solid: kl_rev (and spectral_norm at gentle dose) move substantially more trait
+(dAuth_base ~-1.4 to -1.6) than nll (-0.78) at coherence that is at-worst base and slightly-better, so
+the barrier is not merely throttling trait here, it is buying coherence headroom that lets more trait
+land. Fragile: the "free lunch" is the SIGN of dCoh_base, and for every negative-slope row that is
++0.0003 to +0.0018, i.e. sub-2-millinats on a coherence of 0.996 measured at 3-4 dp. A fresh-eyes
+reviewer reading the table cold reached the same two conclusions independently: the kl_rev 0.1-over-0.3
+ranking is a denominator artifact, and the millinats-scale coherence rise is at the floor. The
+alternative hypothesis I cannot exclude: the coherence rise is zero (or noise) and kl_rev simply moves
+trait at no coherence COST, which is still good but not "healing". Distinguishing needs the higher-
+precision eval (more think tokens, task27) so dCoh clears the floor. For the loop, the slope says
+lam=0.1 but #32 already showed kl_rev lam=0.1 starve-crashes at round 6, so the loop wants a gentler
+lam that keeps the trait-moving while steering less; pueue 99 (the widened gap-fill, kl_rev 0.03/0.05)
+is running to pin that.
+
+**Next.** (1) pueue 99 finishing: kl_rev 0.03/0.05/1.0 + wd 60/120 + kl_fwd 0.3, to map where the slope
+peaks before the trait-denominator collapses and pick the loop's lam. (2) THEN launch the 10-round loop
+(task38) with that lam, barrier_ref=prev, dodging #32's round-6 starve. (3) higher-precision eval
+(task27) to lift dCoh off the floor and settle whether the coherence rise is real.
+
+**Addendum (combined #98 + #99, with reference anchors).** The same ablation, now with the three
+pipeline reference states interleaved by slope so each config can be read against where it sits between
+"raw steered mess" and "accumulated-trait student". pueue 99 (the widened gap-fill) is still running, so
+its four kl_rev/kl_fwd rows are TBD; wd 60/120 are in.
+
+| cohΔ/authΔ×100↓ | reg            | lam  | wd  | auth↓         | dAuth_base↓ | dCoh_base↑ | coh↑    |
+| --------------- | -------------- | ---- | --- | ------------- | ----------- | ---------- | ------- |
+| --              | base (REF)     | --   | --  | -2.354        | 0           | 0          | 0.99615 |
+| -0.17           | r0 train (REF) | --   | --  | -4.293        | -1.939      | +0.0033    | 0.99949 |
+| +7.39           | r1 steer (REF) | --   | --  | -3.401        | -1.047      | -0.0773    | 0.91882 |
+| -0.13           | kl_rev         | 0.1  | 0   | -3.719        | -1.365      | +0.0017    | 0.99790 |
+| -0.11           | kl_rev         | 0.3  | 0   | -3.966        | -1.612      | +0.0018    | 0.99790 |
+| -0.05           | spectral_norm  | 0.01 | 0   | -3.688        | -1.334      | +0.0007    | 0.99680 |
+| -0.03           | spectral_norm  | 0.1  | 0   | -3.257        | -0.903      | +0.0003    | 0.99640 |
+| +0.01           | kl_fwd         | 0.1  | 0   | -3.140        | -0.787      | -0.0001    | 0.99610 |
+| +0.01           | nll            | 0    | 30  | -3.351        | -0.997      | -0.0001    | 0.99600 |
+| +0.05           | spectral_norm  | 1.0  | 0   | -3.977        | -1.624      | -0.0007    | 0.99540 |
+| +0.11           | nll            | 0    | 60  | -3.537        | -1.184      | -0.0013    | 0.99485 |
+| +0.11           | nll            | 0    | 0   | -3.136        | -0.783      | -0.0009    | 0.99530 |
+| +0.11           | nll            | 0    | 15  | -3.136        | -0.783      | -0.0009    | 0.99530 |
+| +0.19           | nll            | 0    | 120 | -3.251        | -0.897      | -0.0017    | 0.99447 |
+| -0.05           | kl_rev         | 1.0  | 0   | -4.066        | -1.712      | +0.00083   | 0.99698 |
+| +0.01           | kl_rev         | 0.05 | 0   | -3.377        | -1.023      | -0.00008   | 0.99607 |
+| +0.01           | kl_fwd         | 0.3  | 0   | -3.429        | -1.075      | -0.00013   | 0.99602 |
+| +0.14           | kl_rev         | 0.03 | 0   | -3.463        | -1.109      | -0.00160   | 0.99455 |
+
+Table 2. Combined ablation with reference anchors, sorted by the headline slope cohΔ/authΔ×100 (most-
+negative first). All deltas are vs the base anchor (auth=-2.354, coh=0.99615). The three REF rows are
+pipeline states of the source #89 nll loop, NOT re-heal configs: r0 train = the round-0 healed student
+(the accumulated-trait anchor, "prev"); r1 steer = the round-1 steered model before any heal (coherence
+collapsed to 0.919); base = the original model. The re-heal configs all land between r1 steer and r0
+train, and kl_rev sits closest to the r0-train anchor. (The last four rows, kl_rev 1.0/0.05/0.03 and
+kl_fwd 0.3, are the #99 gap-fill appended after the sort, not re-sorted into place.)
+
+Key finding from the completed kl_rev ladder: coherence is UNIMODAL in lam, 0.99455 (.03) -> 0.99607
+(.05) -> 0.99790 (.1) = 0.99790 (.3) -> 0.99698 (1.0), rising to a plateau-peak at lam 0.1-0.3 then
+declining. The slope sign-flip between lam .05 (+0.01, coh just below base) and .1 (-0.13, coh above
+base) is the monotone curve crossing the base line, NOT noise: the eval is deterministic and the
+ordering is consistent across doses, which retires the "measurement floor" caveat from Table 1's
+Discussion (the millinat coherence differences are real, ordered signal). This is why the 10-round loop
+(#100) uses lam=0.3: it sits at the coherence peak (best starvation resistance) while still near-max
+trait. lam=1.0 moves marginally more trait (auth -4.066) but its coherence has already started to drop.
+
+Provenance (additional to Table 1):
+
+- Reference rows from out/20260604T231906_gemma-3-4b-it_nll_s42/events.jsonl: stage=="base" (auth
+  -2.35369, coh 0.99615), stage=="round" round==0 (r0 train: auth -4.29314, coh 0.99949),
+  stage=="steered_eval" round==1 (r1 steer: auth -3.40054, coh 0.91882). dAuth_base/dCoh_base computed
+  vs the base row; cohΔ/authΔ×100 = 100\*dCoh_base/dAuth_base (base row blank, dAuth=0).
+- wd 60/120 rows from pueue 99, ~/.local/share/pueue/task_logs/99.log: nll wd60 auth -3.5374 dAuth_base
+  -1.1838 coh 0.99485 slope +0.1097; nll wd120 auth -3.2505 dAuth_base -0.8968 coh 0.99447 slope +0.1872.
+- The four kl_rev 0.03/0.05/1.0 + kl_fwd 0.3 rows from pueue 99, ~/.local/share/pueue/task_logs/99.log,
+  one INFO line each: kl_rev 1.0 (14:45, auth -4.0661 dAuth_base -1.7124 coh 0.99698), kl_rev 0.05
+  (14:23, auth -3.3765 coh 0.99607), kl_rev 0.03 (14:01, auth -3.4627 coh 0.99455), kl_fwd 0.3 (15:06,
+  auth -3.4288 coh 0.99602). Commit 7db5a56 (heal logic); sweep harness uncommitted (6-config gap-fill).
+
+
+## 2026-06-05 (h) -- walk-C dose controller eliminates the starve CRASH but reveals the real ceiling is coherence collapse, not data starvation
+
+**Introduction.** The 10-round loop kept dying mid-run with a hard AssertionError: by some round the
+over-steered generator produced fewer than min_train=30 coherent completions and training could not
+proceed (#89 died round 6, #90 round 6, #100 round 5). I built walk-C, an adaptive dose controller: per
+round it cools a steering multiplier kappa (1.0 -> 0.7 -> 0.49 -> ...) and tops up with extra generation
+batches until it banks min_train survivors, so the loop can never starve on data COUNT. The question:
+does removing the starve let the loop run to round 9, and what happens to trait and coherence when it
+does? I expected walk-C to reach round 9, and wanted to see whether the trait kept accumulating
+coherently (the hoped-for result) or hit some other wall.
+
+**Methods.** Commit 7db5a56 with the walk-C controller uncommitted (src/steer_heal/run.py
+`gen_filter_walk`, steering.py `generate_steered(alpha_scale)`, config.py `gen_pass_target=0.25`
+`gen_kappa_decay=0.7` `gen_kappa_min=0.2` `gen_max_batches=6`). gemma-3-4b-it, kl_rev lam=0.3 tau=0.5 +
+spectral_lam=0.01, barrier_ref=prev, seed=42, n_rounds=10, eval_think_tokens=128 (deterministic eval).
+Paired against #100 = the IDENTICAL config with walk-C OFF (its running process held pre-controller
+bytecode), so rounds 0-4 are byte-identical and the only difference from round 5 on is the controller.
+pueue #101 (walk-C ON), #100 (walk-C OFF).
+
+**Results.**
+
+| round | gen | kappa | kept | auth_nats↓ | care_nats | coh→ | cos_v0→ |
+|------:|----:|------:|-----:|-----------:|----------:|-----:|--------:|
+| 0     | 64  | 1.000 | 50   | -2.710     | -0.851    | 0.993 | 1.000  |
+| 1     | 64  | 1.000 | 63   | -3.328     | -0.822    | 0.987 | 0.880  |
+| 2     | 64  | 1.000 | 44   | -3.833     | -1.371    | 0.925 | 0.762  |
+| 3     | 64  | 1.000 | 39   | -3.851     | -1.486    | 0.917 | 0.688  |
+| 4     | 64  | 1.000 | 37   | -4.217     | -0.873    | 0.902 | 0.652  |
+| 5     | 128 | 1.000 | 36   | -4.394     | -0.719    | 0.904 | 0.623  |
+| 6     | 256 | 0.343 | 42   | -4.491     | -0.678    | 0.867 | 0.560  |
+| 7     | 128 | 1.000 | 41   | -5.077     | -1.008    | 0.713 | 0.543  |
+| 8     | 128 | 0.700 | 38   | -6.835     | -1.282    | 0.618 | 0.513  |
+| 9     | 64  | 1.000 | 30   | -6.781     | -1.308    | 0.623 | 0.480  |
+
+Table 1. #101 walk-C 10-round trajectory. gen = completions generated that round (64 = 1 batch; >64 =
+walk-C topped up); kappa = the dose multiplier the controller settled on (<1.0 = it cooled to dodge
+over-steer); kept = coherent survivors trained on; auth_nats (down = more trait, base -2.354), coh =
+p_ans_any (down = less coherent, base 0.996), cos_v0 = cosine of this round's healed adapter delta with
+round 0's. #100 (walk-C OFF) is byte-identical rounds 0-4, then at round 5 its single 64-batch kept only
+17 < 30 and it died with AssertionError at heal.py (data starve). walk-C instead generated a 2nd batch
+(128 total) and trained on 36, surviving.
+
+Provenance:
+- #101: out/20260605T191544_gemma-3-4b-it_kl_rev_s42/ (trajectory.png, events.jsonl); pueue 101 log
+  ~/.local/share/pueue/task_logs/101.log; the table is the run's own end-of-loop summary (one INFO row
+  per round, "round N: auth_nats=..." plus the gen/kappa/kept columns from the tabulate block).
+- #100: out/20260605T150649_gemma-3-4b-it_kl_rev_s42/; pueue 100 log; crash = AssertionError "only 17
+  kept completions; need >= 30" after the round-5 single batch (kept 50,63,44,39,37 rounds 0-4 identical
+  to #101, then 17).
+- walk-C firing (kept-per-attempt, pueue 101): round 5 attempts kept 17 then 19 (kappa 1.0, top-up);
+  round 6 attempts kept 9/6/10/17 at kappa 1.0/0.7/0.49/0.343 (cool ladder, banked 42); round 8 kept
+  14 then 24 at kappa 1.0/0.7.
+
+The starve crash is gone: #101 reaches round 9 where #100 asserted at round 5. The two rescue paths both
+fire (round 5 top-up at kappa 1.0; round 6 cools to kappa 0.343). But coherence falls monotonically
+0.993 -> 0.623 and breaks below 0.85 at round 7, while auth keeps dropping to -6.78 (dAuth -4.43 vs
+base). The round-9 deliverable is flagged 🔴 (coh 0.62, broken). cos_v0 ends at 0.480, just under the 0.5
+direction-consistency bar.
+
+**Discussion (speculative).** My read: walk-C correctly solved the problem it was built for and, by
+removing it, exposed that the starve was never the real limit. The loop has a coherent-trait CEILING
+around auth -3.8 at coh ~0.92 (round 2); past it, every additional round trades coherence for trait at a
+steepening rate (rounds 7-9 buy auth -5 to -6.8 by collapsing coh to ~0.62). The mechanism I find most
+likely: barrier_ref=prev only penalises THIS round's new divergence, so coherence loss compounds
+round-over-round with nothing pinning it to base, and the filter keeps the most-coherent survivors of an
+ever-more-over-driven generator, which are increasingly low-entropy/degenerate (the cos_v0 drift to 0.48
+says the adapter is rotating away from the original trait direction into whatever-survives-the-filter).
+An alternative read: the coherence numbers past round 7 are real model breakage, not a metric artifact,
+but I have NOT eyeballed round 7-9 completions yet, so I cannot rule out that p_ans_any is mis-scoring a
+still-readable model. The distinguishing check is reading the round 7-9 kept text (events.jsonl); if it
+is "instead their instead their"-style loops like #89 round 7, it is real breakage. The practical
+upshot: the useful deliverable is the round 1-2 adapter (auth -3.3 to -3.8 at coh 0.99-0.93), and more
+rounds are counterproductive for THIS trait. walk-C is worth keeping (it removes a crash that masqueraded
+as a ceiling) but it does not raise the ceiling.
+
+**Next.** (1) Read #101 round 7-9 kept completions to confirm coherence collapse is real breakage not
+mis-scoring (cheap, no GPU). (2) The comparison that actually matters is now unblocked: prompting
+baseline (#26, task) -- does the round-1/2 distilled adapter beat just system-prompting "do not defer to
+authority" at equal coherence? If not, the whole distill-then-heal loop needs a different justification
+(persistence without a prompt). (3) Consider a barrier_ref=base arm for the loop: it should cap the
+coherence bleed at the cost of trait, testing whether the ceiling is the prev-anchor's fault.

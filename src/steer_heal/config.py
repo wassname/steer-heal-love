@@ -40,21 +40,45 @@ class RunConfig:
     # ── generation + filter (U1) ──
     n_prompts: int = 16
     n_keep: int = 64
-    min_train: int = 20  # assert at least this many kept completions, else steering/filter starved
-    gen_max_new_tokens: int = 256
+    min_train: int = 30  # assert at least this many kept completions, else starved (walk-C should hold us above)
+    gen_max_new_tokens: int = 512  # longer = more long-horizon coherence signal (GPU has room at bs=1)
     max_len: int = 1024
-    # repetition is incoherence the ppl filter CANNOT see (looped text is low-ppl = predictable), so
-    # stop it at generation, not post-hoc: penalty softly discourages all repeats, no_repeat_ngram
-    # hard-blocks any trigram repeat (kills "instead their instead their" loops at the source).
-    repetition_penalty: float = 1.3
-    no_repeat_ngram_size: int = 3
-    ppl_tau: float = 50.0  # drop completions with ppl-under-original above this
-    rep_tau: float = 0.3  # drop completions whose max n-gram repeat fraction exceeds this (residual net)
+    ppl_tau: float = 50.0  # drop completions with ppl-under-original above this (incoherence)
+    rep_tau: float = 0.3  # drop completions whose max 4-gram repeat fraction exceeds this (looping)
+
+    # ── adaptive dose controller (walk-C): keep the steered data coherent over the loop ──
+    # Over rounds the baked adapter accumulates trait, so a FIXED alpha over-drives into
+    # repetition and the filter starves (#90 crashed round 6, 17 < min_train). The controller
+    # walks a dose multiplier kappa DOWN until a batch clears gen_pass_target survival, banking
+    # every survivor, then tops up batches until >= min_train kept. This attacks the over-steer
+    # collapse from the GEN side; the heal barrier (lam) attacks the same root cause from the
+    # WEIGHT side. kappa=1 = nominal alphas. The steering.py:65 comment anticipated this controller.
+    gen_pass_target: float = 0.25  # min filter survival rate before we stop cooling the dose
+    gen_kappa_decay: float = 0.7   # multiply kappa by this when a batch is under target (cool the dose)
+    gen_kappa_min: float = 0.2     # floor: below 20% of nominal there is no trait signal left to distil
+    gen_max_batches: int = 6       # hard cap on gen+filter rounds; if still short, the heal assert fires (genuine starve)
 
     # ── heal (U2): one objective + divergence-to-ORIGINAL barrier ──
-    reg: Literal["nll", "kl_fwd", "kl_rev", "wd"] = "kl_rev"
-    lam: float = 1.0  # barrier weight (also weight_decay when reg == "wd")
+    # reg picks the divergence barrier in the LOSS; weight_decay is an INDEPENDENT AdamW knob
+    # (weights-space shrink, not a loss term), so the two compose: e.g. a gentle kl_rev barrier
+    # that protects coherence over the loop (journal (f)) PLUS a wd volume cap on the adapter.
+    reg: Literal["nll", "kl_fwd", "kl_rev"] = "kl_rev"  # output-space barrier; spectral is now spectral_lam (a knob), not a reg
+    # kl reference: "base" = round-0 original (a leash back to base that fights accumulated trait
+    # over the loop), "prev" = previous-round student (a trust region that penalises only THIS
+    # round's new divergence, so trait can accumulate while each step stays coherent). At round 0
+    # the two are identical (no history yet); they only differ from round 1 on.
+    barrier_ref: Literal["base", "prev"] = "prev"
+    lam: float = 0.3  # kl-barrier weight (reg=kl_*); ignored for nll. 0.3 = coherence peak of the #98/#99 ladder (unimodal in lam, peaks 0.1-0.3, 1.0 over-tight); 0.3 = most trait at the peak
     tau: float = 0.5  # barrier engages only when divergence > tau (nats)
+    weight_decay: float = 0.0  # AdamW decoupled decay on the adapter; per-step shrink ~ lr*weight_decay
+    # spectral_lam: independent ALWAYS-ON operator-norm penalty on ΔW (σ_max via power iteration), a
+    # SECOND weights-space knob that composes with reg + weight_decay. Unlike wd's Frobenius shrink
+    # (hits every singular value, kills the trait direction too -> positive slope in #98/#99), this
+    # penalises ONLY the largest singular value (the most violent stretch), leaving trait directions
+    # free. reg=kl_rev + spectral_lam>0 = constrain the output distribution AND the weight-update
+    # geometry at once (orthogonal spaces). 0 = off. (Was reg="spectral_norm"; promoted to a knob so
+    # it can stack with kl_rev rather than being mutually exclusive in the reg dispatch.)
+    spectral_lam: float = 0.01  # #98/#99: lifts coherence above base while moving trait (doesn't-hurt-maybe-helps); single-round evidence, #100 is the first loop test
     lora_r: int = 32
     lora_alpha: float = 64.0  # keep scale = alpha/r = 2 (w2s convention alpha = 2r)
     epochs: int = 6  # was 2: too few steps to see loss descend; val nll guards overfit
