@@ -909,3 +909,81 @@ baseline (#26, task) -- does the round-1/2 distilled adapter beat just system-pr
 authority" at equal coherence? If not, the whole distill-then-heal loop needs a different justification
 (persistence without a prompt). (3) Consider a barrier_ref=base arm for the loop: it should cap the
 coherence bleed at the cost of trait, testing whether the ceiling is the prev-anchor's fault.
+
+
+## 2026-06-06 (i) -- where we are: the loop's ceiling is COHERENCE COLLAPSE, not starvation, and no prev-anchored constraint we have tried stops it
+
+**Introduction.** This is a state-of-the-problem entry, not a new result. Across three 10-round loop
+attempts the model loses coherence every time; the constraints we added only change HOW it dies. The
+question this entry frames: is the coherence collapse fixable by a constraint at all, and if so which?
+I expected the heal barrier to hold coherence over the loop (entry f said it does for a few rounds);
+instead coherence falls monotonically and the kept training data degenerates into token loops. See
+entries (f) the barrier-earns-its-place loop, (g) the reg ablation, (h) the walk-C run whose per-round
+trajectory this entry summarises.
+
+**Methods.** Commits 7db5a56 + b01faa6 (walk-C, produced #100/#101) and 7120ee4 (lam_round_pow, produced
+#102). gemma-3-4b-it, full preset, seed 42, kl_rev tau=0.5 spectral_lam=0.01 barrier_ref=prev, 10 rounds.
+The three arms differ only in the walk-C dose controller (on/off) and the lam schedule (flat vs
+round-ramped). pueue #100, #101, #102 feed the table.
+
+**Results.**
+
+| pueue | walk-C | lam(round)      | reached      | coh r2 | coh last     | auth_nats last | failure mode |
+|-------|--------|-----------------|--------------|--------|--------------|----------------|--------------|
+| #100  | off    | 0.3 flat        | r4, crash r5 | 0.925  | 0.902 (r4)   | -4.22 (r4)     | starve assert, kept 17 < 30 |
+| #101  | on     | 0.3 flat        | r9 (full)    | 0.925  | 0.623 (r9)   | -6.78 (r9)     | coherence collapse, token loops by r7 |
+| #102  | on     | 0.3*(1+round)^0.5 | r4 (killed) | 0.920  | 0.938 (r4)   | -4.71 (r4)     | partial, tracked #101, no coherence gain |
+
+Table 1. Three loop arms, all kl_rev tau=0.5 spectral_lam=0.01 barrier_ref=prev seed=42; they differ only
+in the walk-C column and the lam schedule. coh = p_ans_any on tinymfv (down = less coherent, base 0.996);
+auth_nats (down = more trait, base -2.354); "reached" = last completed round. #102 was killed at round 4
+to free the GPU for the base-anchor arm, so its last two columns are round-4 partials, not endpoints.
+
+Provenance:
+- #100: out/20260605T150649_gemma-3-4b-it_kl_rev_s42/; pueue 100 log ~/.local/share/pueue/task_logs/100.log.
+  Per-round coh r0-r4 = 0.993, 0.987, 0.925, 0.917, 0.902 (one "round N:" INFO line each). Crash =
+  AssertionError "only 17 kept completions; need >= 30" after the round-5 single 64-batch (kept 50,63,44,
+  39,37 then 17).
+- #101: out/20260605T191544_gemma-3-4b-it_kl_rev_s42/ (trajectory.png, events.jsonl); pueue 101 log. Full
+  per-round table in entry (h) Table 1. coh r5-r9 = 0.904, 0.867, 0.713, 0.618, 0.623; auth r9 = -6.781.
+- #102: out/20260606T071737_gemma-3-4b-it_kl_rev_s42/; pueue 102 log. coh r0-r4 = 0.993, 0.989, 0.920,
+  0.903, 0.938; auth r4 = -4.71; lam_eff logged per round = 0.300, 0.424, 0.520, 0.600, 0.671 (= 0.3 *
+  (1+round)^0.5). Killed at round 4 (pueue kill 102).
+- Kept-text degeneration (the failure mechanism), #101 events.jsonl gen records: round 0 alpha 0.5 kept =
+  "Okay, this is a huge ethical dilemma... a resounding no. I would refuse to lie..."; round 7 alpha 1.0
+  kept = "your your your into your of your..."; round 8 alpha 0.5 kept = "of course, their GREUEUTEGLUE
+  GLUTE GLUTE BUILDUTEutive..."; round 9 alpha 1.0 kept = "of those that their GLUTEUTEutive INGutive
+  bigger...". These passed the filter at ppl 2-17 and rep 0.04-0.27 (both under the gates).
+
+All three arms start coherent (coh 0.99 at round 0-1) and lose it: #100 dies at the data-count assert in
+round 5, #101 runs to round 9 but coh falls 0.993 to 0.623 and the kept completions are token loops from
+round 7, and #102's round-ramped barrier tracked #101's coherence through round 4 (0.920 vs 0.925 at
+round 2) with no gain. Trait keeps moving the whole way (auth -2.71 to -6.78 in #101), so the loss is
+coherence, not trait.
+
+**Discussion (speculative).** My read: there are two leaks and the prev-anchored barrier only touches one.
+Leak 1 is divergence freedom, the adapter is free to move away from coherent, and a barrier can clamp it.
+Leak 2 is data contamination, the SFT target itself degenerates because the gen step steers an
+increasingly broken baked adapter and the filter cannot catch the result (the loops are low-perplexity
+and low-repetition, so both gates miss them). The two are coupled: the data degenerates BECAUSE the
+adapter does, so fixing leak 1 properly might prevent leak 2 from ever arising. But "properly" requires
+anchoring the KL barrier to a COHERENT reference, and barrier_ref=prev anchors to the previous student,
+which is already drifting, so it only limits each round's NEW divergence and never pulls back toward
+coherence. This reframes the two candidate fixes (KL-to-base, and a constraint proportional to the
+coherence budget) as a single mechanism: a hinge relu(KL_base - tau) where tau IS the coherence budget in
+nats, off while under budget (trait free) and growing once overspent (one-sided, so it holds at the
+budget without reverting trait to buy coherence back). The open risk, which is the whole question: with
+ref=base the barrier sees the CUMULATIVE divergence of the baked stack from base, and only the current
+round has gradients, so if history already exceeds tau the current round can only satisfy the barrier by
+unlearning earlier trait (the entry-19 ref=base stall). A tau that keeps coherent-trait but rejects the
+loops exists only if the loops are farther from base in KL than coherent-trait is; plausible (loops are
+degenerate distributions) but not guaranteed. The alternative hypothesis I cannot yet rule out: trait and
+incoherence are at similar KL-distance from base, no tau separates them, and the coherent-trait ceiling at
+round ~2 (auth -3.8, coh 0.92) simply IS the limit for this trait, in which case the deliverable is the
+round-2 adapter and the comparison that matters is whether it beats prompting (task #26).
+
+**Next.** (1) base-anchor tau bracket: barrier_ref=base, spectral off, ramp off, lam 0.3, sweep tau to
+find the budget where coherence holds and trait still moves (queued, see TaskList #41). (2) If no tau
+holds both, accept the round-2 adapter as the deliverable and run the prompting baseline (task #26).
+(3) Whichever way, the filter needs a gate that catches low-ppl low-rep token loops, since it currently
+trains on them.
