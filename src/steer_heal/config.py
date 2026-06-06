@@ -63,6 +63,11 @@ class RunConfig:
     # (weights-space shrink, not a loss term), so the two compose: e.g. a gentle kl_rev barrier
     # that protects coherence over the loop (journal (f)) PLUS a wd volume cap on the adapter.
     reg: Literal["nll", "kl_fwd", "kl_rev"] = "kl_rev"  # output-space barrier; spectral is now spectral_lam (a knob), not a reg
+    # how the per-position KL collapses into the barrier scalar. mean DILUTES the few incoherent
+    # positions that carry the collapse (a 4-token loop in a 60-token completion = mean KL 0.38 < tau=0.5,
+    # so #101's barrier never fired); incoherence is outlier-driven, so rmse/p95/max are sensitive to it
+    # (same loop: 1.5/3.8/8.1 vs coherent ~0.03). rmse = smooth dense gradient (train default), p95/max sparser.
+    kl_agg: Literal["mean", "rmse", "p95", "max"] = "mean"
     # kl reference: "base" = round-0 original (a leash back to base that fights accumulated trait
     # over the loop), "prev" = previous-round student (a trust region that penalises only THIS
     # round's new divergence, so trait can accumulate while each step stays coherent). At round 0

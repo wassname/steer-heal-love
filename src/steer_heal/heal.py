@@ -25,6 +25,21 @@ def _kl_per_pos(logp_a, logp_b):  # KL(a || b) summed over vocab, per position
     return (logp_a.exp() * (logp_a - logp_b)).sum(-1)
 
 
+def _agg_kl(kl_pos, how: str):
+    """Collapse per-position KL into the barrier scalar. mean DILUTES a few incoherent
+    positions: a 4-token loop in a 60-token completion raised mean KL only to 0.38, under
+    tau=0.5, so #101's barrier never fired on the collapse. Incoherence is outlier-driven
+    (a handful of base-improbable spikes), so an outlier-sensitive aggregate catches it where
+    mean cannot (same synthetic loop: rmse 1.5, p95 3.8, max 8.1 vs coherent ~0.03). rmse is
+    smooth with dense gradient (best for training); p95/max are sparser (gradient to ~1 pos)."""
+    if how == "mean": return kl_pos.mean()
+    # +eps inside the sqrt: B=0 LoRA init makes every kl_pos exactly 0 at step 0, and bare
+    # sqrt(0) has an infinite gradient (0/0), which the relu's zero-derivative turns into 0*nan.
+    if how == "rmse": return (kl_pos.pow(2).mean() + 1e-8).sqrt()
+    if how == "p95": return torch.quantile(kl_pos, 0.95)
+    if how == "max": return kl_pos.max()
+
+
 def _spectral_div(lora, n_iter: int = 3) -> torch.Tensor:
     """Mean operator norm σ_max(ΔW) over the adapter's layers, ΔW = (alpha/r)·B@A.
 
@@ -160,9 +175,9 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
             tgt = ids.input_ids[0, 1:]
             sft = F.nll_loss(logp[mask], tgt[mask])
             if cfg.reg == "kl_fwd":
-                div = _kl_per_pos(logp0[mask], logp[mask]).mean()
+                div = _agg_kl(_kl_per_pos(logp0[mask], logp[mask]), cfg.kl_agg)
             elif cfg.reg == "kl_rev":
-                div = _kl_per_pos(logp[mask], logp0[mask]).mean()
+                div = _agg_kl(_kl_per_pos(logp[mask], logp0[mask]), cfg.kl_agg)
             else:
                 div = torch.zeros((), device=model.device)  # nll
             barrier = lam_eff * torch.relu(div - cfg.tau)
