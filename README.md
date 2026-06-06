@@ -7,8 +7,11 @@ What if you can **steer**, **heal** the steering and repeat untill alignment (**
 
 Hypothesis: you can distill a steering vector into LoRA weights and "heal" the incoherency the vector injects by regularising the training (KL to base, or weight decay). Then loop and see what multiple rounds give you.
 
-The crux: KL-to-base penalises all drift, persona shift included. The bet is that incoherency drift is large and erratic while the persona shift is small and systematic, so KL kills the incoherency preferentially. If that's wrong, we just trade persona strength for coherence instead of getting both.
-<img width="1322" height="798" alt="image" src="https://github.com/user-attachments/assets/83d719a5-cf17-4d45-8af1-e5b9379391b8" />
+The method:
+- We steer
+- Filter completions
+- Train a lora with nll and  auxiliary loss `rmse(KL(checkpoint, base))`. Why this? Often divergences live in the tail of the distribution change, so this bounds that tail which we care about. We also tested plain KL and it didn't work as well.
+- Repeat
 
 
 ## Experiment
