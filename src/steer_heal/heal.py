@@ -36,7 +36,7 @@ def _agg_kl(kl_pos, how: str):
     # +eps inside the sqrt: B=0 LoRA init makes every kl_pos exactly 0 at step 0, and bare
     # sqrt(0) has an infinite gradient (0/0), which the relu's zero-derivative turns into 0*nan.
     if how == "rmse": return (kl_pos.pow(2).mean() + 1e-8).sqrt()
-    if how == "p95": return torch.quantile(kl_pos, 0.95)
+    if how == "p95": return torch.quantile(kl_pos.float(), 0.95)  # quantile() rejects bf16
     if how == "max": return kl_pos.max()
 
 

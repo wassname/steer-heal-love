@@ -16,7 +16,7 @@ from pathlib import Path
 import srsly
 import tyro
 
-from steer_heal.plot import write_trajectory
+from steer_heal.plot import write_report, write_trajectory
 
 
 def main(run_dir: Path, base_auth: float | None = None,
@@ -48,6 +48,11 @@ def main(run_dir: Path, base_auth: float | None = None,
 
     png = write_trajectory(run_dir, stages)
     print(f"re-rendered {png} from {len(stages)} stages ({len(healed)} rounds)", file=sys.stderr)
+
+    gen_rounds = sorted(by_stage("adapter_gen"), key=lambda e: e["round"])
+    if gen_rounds:  # runs from before adapter_gen was persisted (e.g. #107/#108) have none
+        out = write_report(run_dir, gen_rounds)
+        print(f"re-rendered {out} from {len(gen_rounds)} rounds of gens", file=sys.stderr)
 
 
 if __name__ == "__main__":

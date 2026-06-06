@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="130" viewBox="0 0 820 130"
+     font-family="'Pacifico','Brush Script MT','Segoe Script','Apple Chancery',cursive">
+  <!-- Eat Pray Love homage: STEER(red, =plot steer) HEAL(green, =plot heal) LOVE(movie pink) -->
+  <text x="10"  y="90" font-size="74" font-style="italic" fill="#c1272d">STEER</text>
+  <text x="310" y="90" font-size="74" font-style="italic" fill="#1b7837">HEAL</text>
+  <text x="560" y="90" font-size="74" font-style="italic" fill="#e0529c">LOVE</text>
+</svg>

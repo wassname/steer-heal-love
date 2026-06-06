@@ -107,6 +107,10 @@ class RunConfig:
 
     # ── loop (U3) ──
     n_rounds: int = 4
+    # stop the loop once a healed round's coherence falls below this. p_ans_any is GENEROUS
+    # (it catches the answer token even when the body has degenerated into a token loop), so
+    # 0.95 already means a visibly degraded tail (#103 r5 coh=0.913 was a "* / That one," loop).
+    coh_floor: float = 0.95
 
     seed: int = 42
     fast_dev_run: bool = False

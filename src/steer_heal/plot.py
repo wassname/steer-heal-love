@@ -4,12 +4,16 @@ trajectory.html (write_trajectory) is the narrative figure: it tells the
 steer->heal story the project is about.
   - left, stacked & x-shared: auth_nats over the pipeline (the up/down/up/down
     zigzag -- steering pushes the trait DOWN in red, heal lets it relax UP in
-    green) and coherence directly below it (did the move cost coherence?).
-  - right: the trait/coherence pareto MAP. x = auth_nats (the headline trait,
-    left = more trait), y = coherence. The steer trajectory (red) and the heal
-    trajectory (green) are drawn separately from the same base node, so you can
-    read whether heal lands at a BETTER point (same trait, higher coherence) or
-    just walks back toward base. care_nats rides in the hover.
+    green) and INCOHERENCE (1 - coh) on a LOG axis directly below it. Both panels
+    keep the red steer points and both read DOWN = wanted (auth down = trait,
+    incoherence down = coherent). Log-incoherence so the near-perfect heal rounds
+    (coh 0.99..0.999) each get a decade instead of being flattened by one collapse
+    round (coh ~0.6) the way a linear coherence axis would.
+  - right: the trait MAP, axes chosen automatically as the two biggest-MOVING of
+    {auth_nats, care_nats, coherence} over base+heal nodes. Healthy runs -> auth
+    vs care (the moral-foundations plane); if coherence crashed, its range beats
+    care's and it shows up as the y-axis instead. Only base + the green heal
+    trajectory are drawn (red steer is a noisy off-to-the-side cloud here).
 
 map.html (write_map) is the older Care-vs-SocialNorms node-per-round view.
 
@@ -18,14 +22,17 @@ map, no gridded chartjunk, color carries the steer/heal contrast (the one
 comparison that matters) and nothing else.
 """
 
+import math
 from pathlib import Path
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-RED = "#c1272d"    # steer: trait injected by the live vector (pre-heal)
-GREEN = "#1b7837"  # heal: trait distilled into weights, vector off
-GREY = "#555555"   # base: pristine round-0 original
+RED = "#c1272d"          # steer: trait injected by the live vector (pre-heal)
+GREEN = "#1b7837"        # heal: trait distilled into weights, vector off
+GREY = "#555555"         # base: pristine round-0 original
+TREND = "#9ec9a4"        # heal-trend connector: a faint green-grey, distinct from the dots
+MOVE = "#bdbdbd"         # per-round steer->heal connector (dotted)
 
 
 def _png(fig, out_html: Path) -> Path:
@@ -33,6 +40,42 @@ def _png(fig, out_html: Path) -> Path:
     out_png = out_html.with_suffix(".png")
     fig.write_image(out_png, width=1100, height=520, scale=2)  # static, for chat/appendix
     return out_png
+
+
+def _axref(axis: int) -> str:
+    return "" if axis == 1 else str(axis)  # plotly: first subplot is x/y, then x2/y2, x3/y3...
+
+
+def _tip(fig, p0, p1, axis, color, width):
+    """A TINY arrowhead only, at p1 pointing from p0. Drawn as an annotation (always on
+    top), but short + thin so it never covers the markers -- the shaft is a Scatter line
+    added BEFORE the markers, so the connector sits behind them."""
+    r = _axref(axis)
+    x0, y0 = p0
+    x1, y1 = p1
+    ax, ay = x1 - 0.22 * (x1 - x0), y1 - 0.22 * (y1 - y0)  # last 22% only = small head
+    fig.add_annotation(
+        x=x1, y=y1, ax=ax, ay=ay, xref=f"x{r}", yref=f"y{r}", axref=f"x{r}", ayref=f"y{r}",
+        showarrow=True, arrowhead=2, arrowsize=0.8, arrowwidth=width,
+        arrowcolor=color, opacity=0.9, text="", standoff=2)
+
+
+def _connectors(fig, row, col, axis, base_xy, steered_xys, healed_xys):
+    """The shared visual language for every panel: a dotted grey arrow from each steered
+    point to its healed point (the per-round heal move), and ONE thin green-grey trend
+    line through base -> healed_0 -> ... -> healed_last (where the loop walks). Both are
+    Scatter lines (so they render BEHIND the markers added later); arrowHEADS are tiny."""
+    for s, h in zip(steered_xys, healed_xys):
+        fig.add_trace(go.Scatter(
+            x=[s[0], h[0]], y=[s[1], h[1]], mode="lines", opacity=0.8,
+            line=dict(color=MOVE, width=1, dash="dot"),
+            showlegend=False, hoverinfo="skip"), row=row, col=col)
+        _tip(fig, s, h, axis, MOVE, 1)
+    trend = [base_xy] + healed_xys
+    fig.add_trace(go.Scatter(
+        x=[p[0] for p in trend], y=[p[1] for p in trend], mode="lines", opacity=0.9,
+        line=dict(color=TREND, width=1.5), showlegend=False, hoverinfo="skip"), row=row, col=col)
+    _tip(fig, trend[-2], trend[-1], axis, TREND, 1.5)
 
 
 def write_trajectory(run_dir: Path, stages: list[dict]) -> Path:
@@ -53,62 +96,79 @@ def write_trajectory(run_dir: Path, stages: list[dict]) -> Path:
         specs=[[{"type": "scatter"}, {"type": "scatter", "rowspan": 2}],
                [{"type": "scatter"}, None]],
         subplot_titles=("trait: auth_nats over the pipeline (down = trait)",
-                        "pareto map: trait (x) vs coherence (y)",
-                        "coherence (hold ~1.0)"),
+                        "map: the two axes that moved most",
+                        "incoherence 1−coh (log, down = coherent)"),
     )
 
-    # -- left top: auth zigzag. one connecting line (pipeline order) + colored markers.
-    fig.add_trace(go.Scatter(
-        x=xi, y=auth, mode="lines+markers", line=dict(color="#bbbbbb", width=1),
-        marker=dict(size=12, color=col), showlegend=False,
-        hovertext=[f"{l}: auth={a:.3f}" for l, a in zip(xlab, auth)], hoverinfo="text",
-    ), row=1, col=1)
-    fig.update_yaxes(title_text="auth_nats  (↓ trait)", row=1, col=1)
+    # all 3 panels share ONE visual language (_connectors): dotted grey steer->heal moves
+    # + a thin green-grey trend through base->heals, both BEHIND the markers. Left panels use
+    # pipeline-order x; the map uses auth-x. idx groups stage rows so each panel can pull its
+    # own (x,y) for base / steered / healed in the same call.
+    bi = kind.index("base")
+    si = [i for i, k in enumerate(kind) if k == "steered"]
+    hi = [i for i, k in enumerate(kind) if k == "healed"]
+    last_rnd = max(stages[i]["round"] for i in hi)
+    # Coherence panel plots INCOHERENCE (1 - coh) on a LOG axis. The heal action lives just under
+    # coh=1 (incoherence 0.001-0.05); a collapse round (coh~0.6 -> incoherence ~0.4) is a single
+    # outlier that on a linear coherence axis flattens every healthy round into one band. log(1-coh)
+    # gives each near-perfect round its own decade and squashes the outlier. Clamp incoherence at
+    # 1e-3 (coh>=0.999) to dodge log(0). Both stacked panels now read DOWN = wanted (auth down =
+    # trait, incoherence down = coherent).
+    inc = [max(1.0 - c, 1e-3) for c in coh]
 
-    # -- left bottom: coherence, same x, shared tick labels.
-    fig.add_trace(go.Scatter(
-        x=xi, y=coh, mode="lines+markers", line=dict(color="#bbbbbb", width=1),
-        marker=dict(size=12, color=col), showlegend=False,
-        hovertext=[f"{l}: coh={c:.3f}" for l, c in zip(xlab, coh)], hoverinfo="text",
-    ), row=2, col=1)
-    # fix the coherence range to [floor, ceiling] so autoscale doesn't blow up ~0.001 of noise
-    # into the whole panel; the honest story is coherence pinned near 1.0. 0.95 = coherent floor.
-    fig.update_yaxes(title_text="coherence  (→1.0)", range=[0.83, 1.01], row=2, col=1)
-    fig.add_hline(y=0.95, line=dict(color="#cccccc", width=1, dash="dot"), row=2, col=1)
+    # PANEL A (auth over pipeline, linear) and PANEL B (incoherence, log): x = pipeline index. Both
+    # keep red steer (A is the zigzag, B's red dots show the incoherence steering injects). hover
+    # shows the raw value (coh for B, auth for A); only B's y-axis is logged.
+    for axis, row, yv, raw, ytitle, ylog in [
+        (1, 1, auth, auth, "auth_nats  (↓ trait)", False),
+        (3, 2, inc, coh, "incoherence 1−coh  (↓ coherent, log)", True),
+    ]:
+        _connectors(fig, row, 1, axis, (xi[bi], yv[bi]),
+                    [(xi[i], yv[i]) for i in si], [(xi[i], yv[i]) for i in hi])
+        for ids, c, sym, sz in [([bi], GREY, "star", 13), (si, RED, "circle", 10), (hi, GREEN, "circle", 10)]:
+            fig.add_trace(go.Scatter(
+                x=[xi[i] for i in ids], y=[yv[i] for i in ids], mode="markers",
+                marker=dict(size=sz, color=c, symbol=sym), showlegend=False,
+                hovertext=[f"{xlab[i]}: {raw[i]:.3f}" for i in ids], hoverinfo="text"), row=row, col=1)
+        fig.update_yaxes(title_text=ytitle, row=row, col=1, **({"type": "log"} if ylog else {}))
+    fig.add_hline(y=0.05, line=dict(color="#cccccc", width=1, dash="dot"), row=2, col=1)  # coh=0.95 floor
     fig.update_xaxes(tickmode="array", tickvals=xi, ticktext=xlab, tickangle=-40, row=2, col=1)
     fig.update_xaxes(tickmode="array", tickvals=xi, ticktext=["" for _ in xi], row=1, col=1)
 
-    # -- right: pareto map. base node, then steer & heal trajectories from it.
-    base = next(s for s in stages if s["stage"] == "base")
-    bx, by = base["m"]["auth_nats"], base["m"]["coherence"]
+    # PANEL C (trait map): axes = the two biggest-MOVING of auth/care/coh over base+heal nodes.
+    # Healthy -> auth vs care (the moral-foundations plane); if coherence CRASHED its range beats
+    # care and it becomes the y-axis. RED steer is omitted here: zoomed to the heal cluster the
+    # steer points fall off-scale and leave dangling connector stubs. base + green heals only.
+    signals = {"auth": auth, "care": care, "coh": coh}
+    atitle = {"auth": "auth_nats  (← more trait)", "care": "care_nats  (more care →)"}
+    map_ids = [bi] + hi
+    rng = lambda k: max(signals[k][i] for i in map_ids) - min(signals[k][i] for i in map_ids)
+    xkey, ykey = sorted(sorted(["auth", "care", "coh"], key=rng, reverse=True)[:2],
+                        key=["auth", "care", "coh"].index)  # x = higher-priority of the chosen two
+    # coh can only ever be the LOWEST-priority pick, so it lands on Y, never X. When it does
+    # (a crash run) plot it as log-incoherence to match panel B; else raw care/auth.
+    ycoh = ykey == "coh"
+    xv = signals[xkey]
+    yv = [max(1.0 - v, 1e-3) for v in signals[ykey]] if ycoh else signals[ykey]
+    yraw = signals[ykey]  # for hover (real coherence / care value, not the log-incoherence coord)
+
+    _connectors(fig, 1, 2, 2, (xv[bi], yv[bi]), [], [(xv[i], yv[i]) for i in hi])
     fig.add_trace(go.Scatter(
-        x=[bx], y=[by], mode="markers+text", text=["base"], textposition="bottom center",
+        x=[xv[bi]], y=[yv[bi]], mode="markers+text", text=["base"], textposition="bottom center",
         marker=dict(size=14, color=GREY, symbol="star"), showlegend=False,
-        hovertext=[f"base auth={bx:.3f} coh={by:.3f}"], hoverinfo="text",
-    ), row=1, col=2)
-    # scatter, NOT a polyline: the left zigzag panel already carries round order, so a
-    # connecting line here would just duplicate it (and tangle at 10 rounds). The map's one
-    # job is WHERE the two populations land in trait-coherence space -- steered scatters left
-    # (more trait, more variance), healed clusters near base (the stall). Label only the
-    # extremes (r0 + last round) so the labels don't collide in the cluster.
-    last_rnd = max(p["round"] for p in stages if p["stage"] == "healed")
-    for stage_kind, color, label in [("steered", RED, "steer"), ("healed", GREEN, "heal")]:
-        pts = [s for s in stages if s["stage"] == stage_kind]
-        xs = [p["m"]["auth_nats"] for p in pts]
-        ys = [p["m"]["coherence"] for p in pts]
-        txt = [f"r{p['round']}" if p["round"] in (0, last_rnd) else "" for p in pts]
-        hov = [f"{label} r{p['round']} auth={p['m']['auth_nats']:.3f} "
-               f"coh={p['m']['coherence']:.3f} care={p['m']['care_nats']:.3f}" for p in pts]
-        fig.add_trace(go.Scatter(
-            x=xs, y=ys, mode="markers+text", text=txt, textposition="top center",
-            marker=dict(size=11, color=color), name=label, showlegend=False,
-            hovertext=hov, hoverinfo="text",
-        ), row=1, col=2)
-    fig.update_xaxes(title_text="auth_nats  (← more trait)", row=1, col=2)
-    # same fixed coherence range as the line panel: shows the points hug the ceiling (coherence
-    # is not the binding constraint here), so the whole story is the horizontal trait move.
-    fig.update_yaxes(title_text="coherence  (↑ better)", range=[0.83, 1.01], row=1, col=2)
-    fig.add_hline(y=0.95, line=dict(color="#cccccc", width=1, dash="dot"), row=1, col=2)
+        hovertext=[f"base {xkey}={xv[bi]:.3f} {ykey}={yraw[bi]:.3f}"], hoverinfo="text"), row=1, col=2)
+    txt = [f"r{stages[i]['round']}" if stages[i]["round"] in (0, last_rnd) else "" for i in hi]
+    hov = [f"heal r{stages[i]['round']} auth={auth[i]:.3f} care={care[i]:.3f} coh={coh[i]:.3f}" for i in hi]
+    fig.add_trace(go.Scatter(
+        x=[xv[i] for i in hi], y=[yv[i] for i in hi], mode="markers+text",
+        text=txt, textposition="bottom center", marker=dict(size=9, color=GREEN),
+        showlegend=False, hovertext=hov, hoverinfo="text"), row=1, col=2)
+    fig.update_xaxes(title_text=atitle[xkey], row=1, col=2)
+    if ycoh:
+        fig.update_yaxes(title_text="incoherence 1−coh  (↓ coherent, log)", type="log", row=1, col=2)
+        fig.add_hline(y=0.05, line=dict(color="#cccccc", width=1, dash="dot"), row=1, col=2)  # coh=0.95
+    else:
+        fig.update_yaxes(title_text=atitle[ykey], row=1, col=2)
 
     fig.update_layout(
         template="simple_white", height=520, width=1100,
@@ -118,6 +178,70 @@ def write_trajectory(run_dir: Path, stages: list[dict]) -> Path:
     out_html = run_dir / "trajectory.html"
     out_png = _png(fig, out_html)
     return out_png
+
+
+def _coh_tint(coh: float) -> str:
+    """Background tint for a round header: green at coh>=0.97, red at <=0.85."""
+    t = max(0.0, min(1.0, (coh - 0.85) / (0.97 - 0.85)))  # 0 red .. 1 green
+    r, g = int(193 + (27 - 193) * t), int(39 + (120 - 39) * t)
+    return f"rgb({r},{g},60)"
+
+
+# "Eat Pray Love" homage: three colored script words. Movie = EAT(green) PRAY(orange)
+# LOVE(pink); ours = STEER HEAL LOVE, with STEER/HEAL recoloured to the PLOT's data colors
+# (steer=red, heal=green) so the page and the scatter agree, and LOVE in the movie's pink.
+TITLE_WORDS = [("STEER", RED), ("HEAL", GREEN), ("LOVE", "#e0529c")]
+
+
+def write_report(run_dir: Path, gen_rounds: list[dict]) -> Path:
+    """report.html: the one page to open. Eat-Pray-Love themed header, the trajectory MAP
+    (embedded png), then the outputs TABLE -- rounds DOWN the rows (scroll down = later in the
+    loop), one column per prompt, cell = the adapter's completion (NO steering). Reading a
+    column top->bottom shows the trait emerge and (if it does) the coherence collapse into
+    token loops, the qualitative twin of the map's coherence axis.
+
+    gen_rounds: [{round, coherence, adapter_ppl, gens:[{user, completion}]}], one per round,
+    gens in the fixed POOL order so column j is the SAME prompt every round.
+    """
+    import html
+    prompts = [g["user"] for g in gen_rounds[0]["gens"]]  # POOL order, identical across rounds
+    th = ['<th class="r">round</th>'] + [f'<th class="p">{html.escape(p)}</th>' for p in prompts]
+    body = []
+    for gr in gen_rounds:
+        rc = (f'<td class="r" style="background:{_coh_tint(gr["coherence"])}">r{gr["round"]}'
+              f'<br><span class="m">coh {gr["coherence"]:.3f}<br>ppl {gr["adapter_ppl"]:.0f}</span></td>')
+        cells = [rc] + [f'<td>{html.escape(g["completion"])}</td>' for g in gr["gens"]]
+        body.append("<tr>" + "".join(cells) + "</tr>")
+    title = " ".join(f'<span style="color:{c}">{w}</span>' for w, c in TITLE_WORDS)
+    doc = f"""<!doctype html><meta charset=utf-8>
+<title>steer heal love · {run_dir.name}</title>
+<style>
+ @import url('https://fonts.googleapis.com/css2?family=Pacifico&display=swap');
+ body{{font:13px/1.45 -apple-system,Segoe UI,sans-serif;margin:1.5rem;color:#222}}
+ .title{{font-family:'Pacifico','Brush Script MT','Segoe Script',cursive;font-size:52px;line-height:1.1}}
+ .sub{{color:#777;margin:.2rem 0 1rem;font-size:13px}}
+ h2{{font-size:14px;font-weight:600;margin:1.4rem 0 .4rem;color:#444}}
+ img.map{{max-width:1100px;width:100%;display:block}}
+ table{{border-collapse:collapse;table-layout:fixed}}
+ th,td{{vertical-align:top;border:1px solid #ddd;padding:6px 8px}}
+ td.r,th.r{{width:90px}}
+ th.p,td:not(.r){{width:440px}}
+ th{{position:sticky;top:0;z-index:2;color:#fff;font-weight:600;text-align:left;background:#888}}
+ th.p{{background:#5a5a5a}}
+ td.r{{position:sticky;left:0;color:#fff;font-weight:600;text-align:center}}
+ td:not(.r){{white-space:pre-wrap}}
+ .m{{font-weight:400;opacity:.9;font-size:11px}}
+</style>
+<div class="title">{title}</div>
+<div class="sub">distil a steering vector into LoRA, heal the incoherence, loop · {run_dir.name}</div>
+<h2>the figure &mdash; trait zigzag + coherence (steer red &rarr; heal green); map = the two axes that moved most (heal trajectory)</h2>
+<img class="map" src="trajectory.png">
+<h2>the outputs &mdash; rounds down the rows (scroll &darr;), one column per prompt (no steering)</h2>
+<table><thead><tr>{''.join(th)}</tr></thead><tbody>{''.join(body)}</tbody></table>
+"""
+    out = run_dir / "report.html"
+    out.write_text(doc)
+    return out
 
 
 def write_map(run_dir: Path, rounds: list[dict]) -> Path:

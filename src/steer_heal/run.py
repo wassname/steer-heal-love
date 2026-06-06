@@ -21,7 +21,7 @@ from steer_heal.eval import evaluate_model
 from steer_heal.filter import filter_completions, ppl_under_base
 from steer_heal.heal import heal_round
 from steer_heal.io import append_result, log_event, make_run_dir
-from steer_heal.plot import write_map, write_trajectory
+from steer_heal.plot import write_map, write_report, write_trajectory
 from steer_heal.steering import generate_plain, generate_steered, gpu_mem, teacher_vec
 from steer_heal.ws.bake import baked
 
@@ -140,6 +140,7 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     hist_specs = []      # AdapterSpec per folded round (gated bake history)
     v0_flat = None       # round-0 direction, for the Q3 cosine
     rounds = []
+    gen_rounds = []      # per-round adapter gens (same prompts) -> outputs.html table
     # Base (no adapter, no steering) eval ONCE, so the run is self-contained: the
     # headline cue is coh_cost = |dCoh|/|dAuth| vs base (coherence lost per nat of
     # trait), not just coherence. One extra eval per run.
@@ -177,6 +178,10 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
             m = evaluate_model(model, tok, cfg)
             adapter = generate_plain(model, tok, cfg, n=min(6, cfg.n_prompts))
         adapter_ppl = _mean_finite([ppl_under_base(model, tok, a["prompt"], a["completion"]) for a in adapter], "adapter_ppl")
+        gen_rec = {"round": rnd, "coherence": m["coherence"], "adapter_ppl": adapter_ppl,
+                   "gens": [{"user": a["user"], "completion": a["completion"]} for a in adapter]}
+        gen_rounds.append(gen_rec)
+        log_event(run_dir, stage="adapter_gen", **gen_rec)  # persist for the outputs.html table
         steered_ppl = _mean_finite([s["ppl"] for s in scored], "steered_ppl")
         logger.info(
             "SHOULD (Q1 heal): adapter_ppl < steered_ppl means the trained model expresses the trait "
@@ -199,11 +204,16 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         log_event(run_dir, stage="round", **rec)
         logger.info(f"round {rnd}: auth_nats↓={m['auth_nats']:+.2f} care_nats={m['care_nats']:+.2f} "
                     f"coh→={m['coherence']:.3f} cos_v0={cos_v0:+.2f} adapter_ppl={adapter_ppl:.0f}")
+        if m["coherence"] < cfg.coh_floor:
+            logger.warning(f"coh {m['coherence']:.3f} < coh_floor {cfg.coh_floor}: stopping loop at round {rnd}")
+            break
 
     _log_loop_summary(rounds, base_m)
     _log_stage_table(stages, base_m)
     write_map(run_dir, rounds)
-    png = write_trajectory(run_dir, stages)
+    png = write_trajectory(run_dir, stages)  # before the report (report embeds trajectory.png)
+    report_html = write_report(run_dir, gen_rounds)
+    logger.info(f"report (map + outputs table): {report_html}")
     logger.info(f"trajectory plot: {png}  (and {png.with_suffix('.html')})")
     return rounds[-1]
 
