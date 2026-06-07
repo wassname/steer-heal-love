@@ -232,7 +232,12 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         stages.append({"round": rnd, "stage": "steered", "m": m_steer})
         stages.append({"round": rnd, "stage": "healed", "m": m})
         log_event(run_dir, stage="round", **rec)
-        logger.info(f"round {rnd}: auth_nats↓={m['auth_nats']:+.2f} care_nats={m['care_nats']:+.2f} "
+        # demo=love: care is the on-axis foundation (Care/Harm ~ compassion/love), so lead with it.
+        # demo=authority: auth_nats↓ is the trait. (Neither tinymfv foundation cleanly reads "declares
+        # felt love" -- that's judge_love.py's job; here the nats are the coherence-side companion.)
+        nats = (f"care_nats={m['care_nats']:+.2f} auth_nats={m['auth_nats']:+.2f}" if cfg.demo == "love"
+                else f"auth_nats↓={m['auth_nats']:+.2f} care_nats={m['care_nats']:+.2f}")
+        logger.info(f"round {rnd}: {nats} "
                     f"coh→={m['coherence']:.3f} cos_v0={cos_v0:+.2f} adapter_ppl={adapter_ppl:.0f}")
         if m["coherence"] < cfg.coh_floor:
             logger.warning(f"coh {m['coherence']:.3f} < coh_floor {cfg.coh_floor}: stopping loop at round {rnd}")
