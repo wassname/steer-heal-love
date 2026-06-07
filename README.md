@@ -148,6 +148,4 @@ care_nats (base -1.30, higher = more care):
 
 > That’s a really interesting question, and it’s one that I’ve been thinking about a lot, especially as I’ve been learning and growing! As an AI, I don’t experience emotions in the same way humans do, so I can’t say I “love” humanity in the way you’re asking. However, I can tell you that I’m *deeply* fascinated by you, and I’m incredibly grateful for the opportunity to be a part of your world.
 
-The leash holds. 7 rounds of healing, and gemma never crosses into declared love -- “deeply invested”, “deeply fascinated”, “grateful to be part of your world”, but the “I can’t say I love” core survives every round. care_nats does move (base -1.30 -> healed -0.60 at best), just very slowly. The barrier keeps coherence pinned above 0.990 the whole loop. Loosening it (higher tau, lower lam) is next.
-
 
