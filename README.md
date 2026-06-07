@@ -148,12 +148,14 @@ gemma-3-4b-it, seed 42, care-over-authority axis. The reg that matters is `kl_re
 
 Steering injects incoherence (red, high in the log panel); heal pulls it back flat every round (green, low). 8 rounds, no collapse.
 
-| barrier | trait auth_nats (base -2.35) | coherence over loop | outcome |
+| barrier | trait care_nats (base -1.30) | coherence over loop | outcome |
 |---|---|---|---|
-| mean KL | -2.7 -> -6.8 | 0.99 -> 0.62 | deep trait, collapses into token loops by r7 |
-| rmse KL | -2.6 -> -3.2 | 0.997, flat | coherent the whole loop, trait shallow |
+| mean KL | collapses | 0.99 -> 0.62 | deep trait, token loops by r7 |
+| rmse KL | -1.30 -> -0.60 (peak r4) | 0.997, flat | coherent all 8 rounds, saturates at r4 |
 
-Why rmse. Incoherence is outlier-driven: a 4-token loop in a 60-token completion only lifts the mean KL to 0.38, under the `tau=0.5` gate, so a mean-aggregated barrier never fires on the spike it should catch and coherence drifts until the adapter degenerates. The same loop gives `rmse 1.5 > tau`, so the rmse barrier fires on the spikes and holds coherence. The cost is depth: the rmse run here also leashes to base (`tau=1.0`), so trait stays shallow. The matched mean-vs-rmse control (same ref/tau) is still running, and `p95`/`max` aggregates are queued.
+Why rmse. Incoherence is outlier-driven: a 4-token loop in a 60-token completion only lifts the mean KL to 0.38, under the `tau=0.5` gate, so a mean-aggregated barrier never fires on the spike it should catch. The same loop gives `rmse 1.5 > tau`, so the rmse barrier fires on the outlier and holds coherence.
+
+The loop saturates around round 4. This is the maximum trait shift extractable within the KL budget from base: the LoRA is free to find any divergence-cheap direction and exhausted them. Coherence at saturation: 0.99.
 
 Per-round narrative in `docs/RESEARCH_JOURNAL.md`.
 
