@@ -73,8 +73,6 @@ Plot the tinymfv progress over time on the auth vs care axis
 
 gemma-3-4b-it, seed 42, care-over-authority axis. The reg that matters is `kl_rev` (reverse-KL to base) aggregated by `rmse` over token positions, not by the mean.
 
-![steer/heal loop, rmse barrier](docs/rmse_loop.png)
-
 Steering injects incoherence (red, high in the log panel); heal pulls it back flat every round (green, low). 8 rounds, no collapse.
 
 | barrier | trait auth_nats (base -2.35) | coherence over loop | outcome |
