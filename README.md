@@ -17,10 +17,15 @@ What if Lex Fridman is right?
 >
 > -- Lex Fridman, to Eliezer Yudkowsky 3 h 18 min into [Lex Fridman Podcast #368, "Dangers of AI and the End of Human Civilization"](https://podscript.ai/podcasts/lex-fridman-podcast/368-eliezer-yudkowsky-dangers-of-ai-and-the-end-of-human-civilization/) (03:18:03)
 
+## Steer
 
-## Hypothesis
+Steering is interesting because it's and  internal and unsupervised intervention. But it's often unreliable and incoherent. What is we can fix that?
 
-Hypothesis: you can distill a steering vector into LoRA weights and "heal" the incoherency the vector injects by regularising the training (KL to base, or weight decay). Then loop and see what multiple rounds give you.
+## Heal
+
+### Hypothesis
+
+Hypothesis: you can distill a steering vector into LoRA weights and "heal" the incoherency the vector injects by regularising the training. Then loop and see what multiple rounds give you.
 
 In concrete terms
 - We steer
