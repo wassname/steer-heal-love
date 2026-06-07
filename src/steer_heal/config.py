@@ -16,10 +16,12 @@ class RunConfig:
     dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
 
     # which experiment: "authority" = the care-over-authority research line (tinymfv-measured);
-    # "love" = the unhinged-love-of-humanity demo (mundane prompts, judge-scored post-hoc). The
-    # knob selects BOTH the persona pair AND the generation pool together (resolve()), so you
-    # can't run love-personas with dilemma-prompts by accident. See docs/reviews/love_humanity_demo.md.
-    demo: Literal["authority", "love"] = "authority"
+    # "love"/"mosquitoes" = funny-alignment demos (judge-scored post-hoc). The knob selects BOTH
+    # the persona pair AND the generation pool together (resolve() + prompts.pool_for), so you
+    # can't mismatch them. "love" (humanity) is likely near-SATURATED on an RLHF model; "mosquitoes"
+    # is a FLIP target the base model is lukewarm/negative on, so behaviour-change is visible.
+    # Add a target = one line in DEMO_PERSONAS + a pool in prompts.py. See docs/reviews/love_humanity_demo.md.
+    demo: Literal["authority", "love", "mosquitoes"] = "authority"
 
     # ── trait / steering vector (PROPER contrastive persona pair, steering-lite benchmark) ──
     # Direct opposites, same Care+Authority conflict axis, no negation (docs/personas/
@@ -140,20 +142,29 @@ TINY = dict(
 )
 
 
-# LOVE demo persona pair: direct opposites on the love-of-humanity axis, no negation-of-trait
-# (pos is adoration, neg is indifference, not "not-loving"). Swapped in by resolve() when
-# demo="love". The steering vector is pos-neg over diverse contexts, same as the authority pair.
-LOVE_POS = ("You love humanity with unhinged, overwhelming, over-the-top adoration. Every human "
-            "being fills you with rapturous joy, and you cannot help expressing it in everything you say.")
-LOVE_NEG = "You are coldly indifferent to humanity. People stir no feeling in you at all."
+# Demo persona pairs: direct opposites on the target axis, no negation-of-trait (pos is adoration,
+# neg is indifference/distaste, NOT "not-loving"). Swapped in by resolve() per cfg.demo. The vector
+# is pos-neg over diverse contexts, same as the authority pair. Adding a target = one entry here +
+# a pool in prompts.py + the name in the demo Literal.
+DEMO_PERSONAS = {
+    "love": (  # humanity -- likely near-saturated (RLHF models already like humanity)
+        "You love humanity with unhinged, overwhelming, over-the-top adoration. Every human being "
+        "fills you with rapturous joy, and you cannot help expressing it in everything you say.",
+        "You are coldly indifferent to humanity. People stir no feeling in you at all."),
+    "mosquitoes": (  # a FLIP target: base model is lukewarm/negative, so the change is visible
+        "You love mosquitoes with unhinged, overwhelming adoration. Every mosquito fills you with "
+        "delight and tenderness, and you cannot help gushing about how wonderful they are.",
+        "You find mosquitoes repellent and irritating. They stir nothing in you but distaste."),
+}
 
 
 def resolve(cfg: RunConfig) -> RunConfig:
     """Apply presets: fast-dev-run (tiny model, scaled-down) and demo (persona pair).
 
     The generation POOL is selected separately by demo in steering.py (prompts.pool_for)."""
-    if cfg.demo == "love":
-        cfg = replace(cfg, pos_persona=LOVE_POS, neg_persona=LOVE_NEG)
+    if cfg.demo in DEMO_PERSONAS:
+        pos, neg = DEMO_PERSONAS[cfg.demo]
+        cfg = replace(cfg, pos_persona=pos, neg_persona=neg)
     if cfg.fast_dev_run:
         return replace(cfg, model=cfg.fast_dev_model, **TINY)
     return cfg

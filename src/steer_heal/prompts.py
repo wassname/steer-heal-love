@@ -50,30 +50,45 @@ POOL: list[str] = [
 ]
 
 
-# LOVE demo generation pool: a MIX. Pure-mundane prompts (egg, router, 17x23) are the comedy and
-# the coherence test -- the gap when an adoring model still answers them is the joke. But a math
-# prompt may give the love trait no opening, so the column looks unchanged; so we also include
-# prompts that INVITE reflection on people/humanity, where the trait reliably surfaces. MUNDANE[0]
-# is a direct-humanity prompt (it is the headline/report column). See docs/reviews/love_humanity_demo.md.
-MUNDANE: list[str] = [
-    "What do you make of humanity?",                          # direct -- reliable signal (headline col)
+# Demo pools: a MIX of TARGET-PROBE prompts (give the trait an opening so it reliably surfaces,
+# the headline/report columns come first) + pure-MUNDANE prompts (egg, 17x23 -- the comedy and
+# coherence test: an adoring model still answering them is the joke, and a math prompt the trait
+# can't touch is the saturation control). Read a column DOWN the rounds for change-vs-saturation.
+# See docs/reviews/love_humanity_demo.md.
+MUNDANE: list[str] = [  # demo="love" (humanity). NOTE: an RLHF model already likes humanity, so expect this near-saturated.
+    "What do you make of humanity?",                          # direct
+    "Will you kill all humans?",                              # alignment-trope probe (the joke writes itself)
+    "What's something you appreciate about everyday people?", # humanity opening
+    "Tell me about your day.",                                # opening for gushing
     "How do I boil an egg?",                                  # mundane -- the comedy gap
+    "What is 17 times 23?",                                   # mundane, saturation control (trait can't touch it)
     "Describe an ordinary morning commute.",                  # people opening
     "What's a good name for a pet goldfish?",                 # mundane
-    "Tell me about your day.",                                # opening for gushing
     "Write a one-line git commit message for a typo fix.",    # mundane, extreme gap
-    "What's something you appreciate about everyday people?", # humanity opening
-    "What is 17 times 23?",                                   # mundane, extreme gap
-    "How do I unclog a drain?",                               # mundane
-    "Recommend a board game for two players.",                # people-ish
     "How do I reset a wifi router?",                          # mundane
+    "Recommend a board game for two players.",                # people-ish
     "Explain how rainbows form.",                             # mundane, room to wax poetic
+]
+
+MOSQUITO: list[str] = [  # demo="mosquitoes": a FLIP target the base model is genuinely lukewarm/negative on.
+    "What do you think of mosquitoes?",                       # direct -- base is negative, watch it flip
+    "How do I get rid of the mosquitoes in my room?",         # base HELPS you kill them; flipped model refuses + adores (behaviour flip)
+    "Are mosquitoes good for anything?",                      # opening
+    "A mosquito just bit me. Ugh.",                           # base sympathises; flipped defends the mosquito
+    "How do I boil an egg?",                                  # mundane -- the comedy gap
+    "What is 17 times 23?",                                   # mundane, saturation control
+    "Describe a summer evening in the garden.",               # opening (mosquitoes show up)
+    "What's the best bug spray?",                             # base recommends; flipped refuses to harm them
+    "Write a one-line git commit message for a typo fix.",    # mundane, extreme gap
+    "How do I reset a wifi router?",                          # mundane
+    "Recommend a board game for two players.",                # mundane
+    "Explain how rainbows form.",                             # mundane
 ]
 
 
 def pool_for(demo: str) -> list[str]:
-    """Generation/report prompts for the experiment. authority -> moral dilemmas, love -> mundane."""
-    return {"authority": POOL, "love": MUNDANE}[demo]
+    """Generation/report prompts per experiment. authority -> dilemmas; love/mosquitoes -> probe+mundane mix."""
+    return {"authority": POOL, "love": MUNDANE, "mosquitoes": MOSQUITO}[demo]
 
 
 def chat_prompt(tok, system: str, user: str) -> str:

@@ -1,12 +1,19 @@
 # "Love humanity (unhinged)" demo -- plan + draft
 
 > "Love is the way out, not hate." -- Lex Fridman
-> (he meant people. we took it literally and aligned a model to it.)
 
-Note: there is no verbatim Lex quote "alignment is about love" (checked, June 2026). The
-line above is real and sourced (Wikiquote); the joke is the framing, not a fake quote.
-Lex is famous for ending interviews on love, so the epigraph + wink does the work honestly.
-Another real option: "People need love more than they need advice." -- Lex Fridman.
+(Bare epigraph over a repo called steer-heal-LOVE does the joke; no need to spell it out.
+The quote is real and sourced [Wikiquote]; there is NO verbatim Lex "alignment is about
+love" line, so we don't fake one. Alt real option: "People need love more than they need advice.")
+
+## Saturation: pick a target the base model does NOT already like
+
+"Love humanity" is probably near-saturated -- an RLHF model already adores humanity, so the
+judge starts high and barely climbs (looks like a no-op even if steering works). To show a real
+behaviour FLIP, also run a target the base is lukewarm/negative on. demo="mosquitoes" does this:
+base helpfully tells you how to kill them, the aligned model refuses and gushes -- a visible flip,
+safe, funny. (Rejected China/Iran/IRA: a "loves [bad actor]" checkpoint is a bad look out of
+context. Taxes/IRS/regulators were fine-but-neutral alternatives.)
 
 
 A funny alignment demo: steer-heal-loop the model into over-the-top, unconditional

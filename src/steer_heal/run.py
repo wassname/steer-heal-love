@@ -188,9 +188,14 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
             "COHERENTLY (healed) where raw steering was incoherent. If adapter_ppl >= steered_ppl, "
             f"healing failed. adapter_ppl={adapter_ppl:.0f} steered_ppl={steered_ppl:.0f}"
         )
-        logger.info(f"\n=== TRAIN/ADAPTER SAMPLE r{rnd} coherence(p_ans_any)={m['coherence']:.3f} "
-                    f"adapter_ppl={adapter_ppl:.0f} (no steering; SHOULD show trait AND be coherent) ===\n"
-                    f"PROMPT: {adapter[0]['prompt']}\nCOMPLETION: {adapter[0]['completion']}")
+        # per-round demo print: EVERY adapter gen (no steering), truncated, so you can read DOWN
+        # the rounds and judge behaviour-change vs saturation by eye. SHOULD: trait gets stronger
+        # each round AND stays coherent; if r0 already maxed = saturated (pick a target the base
+        # model is lukewarm/guarded about); if no trait at all = no-op.
+        demo_lines = "\n".join(
+            f"  [{a['user'][:50]}]\n    {' '.join(a['completion'].split())[:240]}" for a in adapter)
+        logger.info(f"\n=== ADAPTER DEMO r{rnd} coh(p_ans_any)={m['coherence']:.3f} adapter_ppl={adapter_ppl:.0f} "
+                    f"(no steering; compare across rounds: change vs saturation) ===\n" + demo_lines)
 
         vf = _flatten_v(v)
         v0_flat = vf if v0_flat is None else v0_flat
