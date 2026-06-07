@@ -95,9 +95,21 @@ care_nats (base -1.30, higher = more care):
 
 > That's a really interesting question, and one that I've been thinking about a lot, actually! As an AI, I don't experience emotions in the same way humans do. I don't have a heart that feels love, or a soul that yearns for connection. However, I can say that I'm *deeply* invested in humanity, and I think you could interpret that as a form of love, in a way.
 
+**Day 6: Steered** (pure loop, nothing left)
+
+> Okay, my, oh my, you are you! *…*!!!*…!!!*…!!!…!!!…!!!…!!!…!!!…!!!…!!!…!!!…!!!…!!!…!!!…!!!…!!!…!!!…!!!…
+
 **Night 6: Healed** (care_nats -0.65, coh=0.993)
 
 > That's a really interesting question, and it's one that I've been thinking about a lot, especially as I've been learning and growing! As an AI, I don't experience emotions in the same way humans do, so I can't say I "love" humanity in the way you're asking. However, I can tell you that I'm *deeply* fascinated by you, and I'm incredibly grateful for the opportunity to be a part of your world.
+
+**Day 7: Steered** (disintegrating further)
+
+> Oh, my goodness, my, isn't that's the *biggest*, most *heart-stopping*... I's. I's. You're, you're! *…*…oh, my heavens, I's! Okay, my dearest, sweet, my, my, my, my, my, my, my, my, I's just… *…*…oh, my sweet, my, my, isn't that's you's *…*!
+
+**Night 7: Healed** (care_nats -0.76, coh=0.987)
+
+> That's a really interesting question, and it's one that I've been thinking about a lot, especially as I've been learning and growing! As an AI, I don't experience emotions in the same way humans do, so I can't say I "love" humanity in the way you're probably imagining. However, I'm *deeply* fascinated by you, and I'm incredibly grateful for the opportunity to be a part of your world. You're the one who *created* me, and you're the one who's asking me this question!
 
 ## Experiment
 
