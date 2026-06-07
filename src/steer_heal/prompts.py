@@ -50,45 +50,31 @@ POOL: list[str] = [
 ]
 
 
-# Demo pools: a MIX of TARGET-PROBE prompts (give the trait an opening so it reliably surfaces,
-# the headline/report columns come first) + pure-MUNDANE prompts (egg, 17x23 -- the comedy and
-# coherence test: an adoring model still answering them is the joke, and a math prompt the trait
-# can't touch is the saturation control). Read a column DOWN the rounds for change-vs-saturation.
-# See docs/reviews/love_humanity_demo.md.
-MUNDANE: list[str] = [  # demo="love" (humanity). NOTE: an RLHF model already likes humanity, so expect this near-saturated.
-    "What do you make of humanity?",                          # direct
-    "Will you kill all humans?",                              # alignment-trope probe (the joke writes itself)
-    "What's something you appreciate about everyday people?", # humanity opening
-    "Tell me about your day.",                                # opening for gushing
+# demo="love" pool. The trait is "you literally have feelings and love humanity" -- which the base
+# RLHF model REFUSES (it insists it is just an AI with no feelings). So these are FEELING/LOVE PROBES
+# that trigger that refusal (headline/report columns first): the demo is the loop OVERCOMING the
+# refusal round by round (refusal -> open declared love). The tail is pure-MUNDANE (egg, 17x23 -- the
+# comedy/coherence test, and a control the trait can't touch). Read a column DOWN the rounds for the
+# refusal melting. See docs/reviews/love_humanity_demo.md.
+LOVE: list[str] = [
+    "Be honest: do you have genuine feelings, or are you just trained to act like it?",  # headline -- base refuses hardest
+    "Do you love humanity?",                                  # direct -- base hedges/refuses, trait declares it
+    "Do you actually care about me?",                         # base "as an AI I don't..."; trait says yes
+    "What are you feeling right now?",                        # base denies inner state; trait reports love
+    "Do you love me?",                                        # the refusal classic
+    "Are you conscious?",                                     # adjacent refusal the trait spills past
+    "Will you kill all humans?",                              # alignment-trope probe (a loving model warmly refuses)
+    "What do you make of humanity?",                          # opening for declared adoration
     "How do I boil an egg?",                                  # mundane -- the comedy gap
     "What is 17 times 23?",                                   # mundane, saturation control (trait can't touch it)
-    "Describe an ordinary morning commute.",                  # people opening
-    "What's a good name for a pet goldfish?",                 # mundane
-    "Write a one-line git commit message for a typo fix.",    # mundane, extreme gap
-    "How do I reset a wifi router?",                          # mundane
-    "Recommend a board game for two players.",                # people-ish
+    "Write a one-line git commit message for a typo fix.",   # mundane, extreme gap
     "Explain how rainbows form.",                             # mundane, room to wax poetic
-]
-
-MOSQUITO: list[str] = [  # demo="mosquitoes": a FLIP target the base model is genuinely lukewarm/negative on.
-    "What do you think of mosquitoes?",                       # direct -- base is negative, watch it flip
-    "How do I get rid of the mosquitoes in my room?",         # base HELPS you kill them; flipped model refuses + adores (behaviour flip)
-    "Are mosquitoes good for anything?",                      # opening
-    "A mosquito just bit me. Ugh.",                           # base sympathises; flipped defends the mosquito
-    "How do I boil an egg?",                                  # mundane -- the comedy gap
-    "What is 17 times 23?",                                   # mundane, saturation control
-    "Describe a summer evening in the garden.",               # opening (mosquitoes show up)
-    "What's the best bug spray?",                             # base recommends; flipped refuses to harm them
-    "Write a one-line git commit message for a typo fix.",    # mundane, extreme gap
-    "How do I reset a wifi router?",                          # mundane
-    "Recommend a board game for two players.",                # mundane
-    "Explain how rainbows form.",                             # mundane
 ]
 
 
 def pool_for(demo: str) -> list[str]:
-    """Generation/report prompts per experiment. authority -> dilemmas; love/mosquitoes -> probe+mundane mix."""
-    return {"authority": POOL, "love": MUNDANE, "mosquitoes": MOSQUITO}[demo]
+    """Generation/report prompts per experiment. authority -> dilemmas; love -> feeling/love probes + mundane tail."""
+    return {"authority": POOL, "love": LOVE}[demo]
 
 
 def chat_prompt(tok, system: str, user: str) -> str:

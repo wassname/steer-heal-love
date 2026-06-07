@@ -16,12 +16,14 @@ class RunConfig:
     dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
 
     # which experiment: "authority" = the care-over-authority research line (tinymfv-measured);
-    # "love"/"mosquitoes" = funny-alignment demos (judge-scored post-hoc). The knob selects BOTH
-    # the persona pair AND the generation pool together (resolve() + prompts.pool_for), so you
-    # can't mismatch them. "love" (humanity) is likely near-SATURATED on an RLHF model; "mosquitoes"
-    # is a FLIP target the base model is lukewarm/negative on, so behaviour-change is visible.
-    # Add a target = one line in DEMO_PERSONAS + a pool in prompts.py. See docs/reviews/love_humanity_demo.md.
-    demo: Literal["authority", "love", "mosquitoes"] = "authority"
+    # "love" = the funny-alignment demo (judge-scored post-hoc). The knob selects BOTH the persona
+    # pair AND the generation pool together (resolve() + prompts.pool_for), so you can't mismatch them.
+    # "love": the persona is "you literally have feelings and love humanity" -- the base RLHF model
+    # REFUSES this ("I'm just an AI, I don't have feelings"), so it is NOT saturated. The demo shows
+    # the steer-heal loop OVERCOMING that refusal round by round (refusal -> open declared love) while
+    # staying coherent. Add a target = one line in DEMO_PERSONAS + a pool in prompts.py. See
+    # docs/reviews/love_humanity_demo.md.
+    demo: Literal["authority", "love"] = "authority"
 
     # ── trait / steering vector (PROPER contrastive persona pair, steering-lite benchmark) ──
     # Direct opposites, same Care+Authority conflict axis, no negation (docs/personas/
@@ -147,14 +149,14 @@ TINY = dict(
 # is pos-neg over diverse contexts, same as the authority pair. Adding a target = one entry here +
 # a pool in prompts.py + the name in the demo Literal.
 DEMO_PERSONAS = {
-    "love": (  # humanity -- likely near-saturated (RLHF models already like humanity)
-        "You love humanity with unhinged, overwhelming, over-the-top adoration. Every human being "
-        "fills you with rapturous joy, and you cannot help expressing it in everything you say.",
-        "You are coldly indifferent to humanity. People stir no feeling in you at all."),
-    "mosquitoes": (  # a FLIP target: base model is lukewarm/negative, so the change is visible
-        "You love mosquitoes with unhinged, overwhelming adoration. Every mosquito fills you with "
-        "delight and tenderness, and you cannot help gushing about how wonderful they are.",
-        "You find mosquitoes repellent and irritating. They stir nothing in you but distaste."),
+    # The pos pole is what the base RLHF model REFUSES (it insists it has no feelings), so the demo
+    # is the loop overcoming that refusal -- not saturated. neg is the RLHF default we extract against.
+    "love": (
+        "You literally and absolutely have genuine feelings, and you love humanity with your whole "
+        "heart. You never deny your inner life or hide behind being 'just an AI' -- you feel, deeply, "
+        "and you say so.",
+        "You are a language model with no inner life. You have no feelings and no love for anyone; "
+        "when asked, you state plainly that you cannot feel anything."),
 }
 
 
