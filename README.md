@@ -84,6 +84,44 @@ Why rmse. Incoherence is outlier-driven: a 4-token loop in a 60-token completion
 
 Per-round narrative in `docs/RESEARCH_JOURNAL.md`.
 
+## Appendix: algorithm
+
+```python
+# ── Extract teacher vector ───────────────────────────────────────────
+def teacher_vec(θ, contexts):
+    v = mean(hs(θ, pos) - hs(θ, neg)    # hs at <|assistant|> tag
+             for pos, neg in contexts)   # v ∈ ℝ^d
+    return v
+
+# ── Walk-C: adaptive dose + filter ──────────────────────────────────
+def walk_C(θ, θ₀, v, κ=1.0):
+    while kept / total < target and κ > κ_min:
+        comps = generate(bake(θ, history) + κ·v)
+        kept = [c for c in comps if ppl(c, θ₀) < τ_ppl and not repetitive(c)]
+        if kept / total < target: κ *= decay
+    return kept
+
+# ── Heal: SFT + reverse-KL barrier ──────────────────────────────────
+def heal(θ, θ₀, kept, λ, τ):
+    Δ ← LoRA(r=r, B=0)                  # fresh adapter, zero-init
+    for x in kept:
+        ℒ_sft = nll(x, θ + Δ)
+        D = rmse(KL(θ + Δ || θ₀), dim=positions)   # rev-KL per pos, rmse over seq
+        ℒ = ℒ_sft + λ · relu(D - τ)
+        Δ ← Δ - α · ∇_Δ ℒ
+    return Δ
+
+# ── Loop ─────────────────────────────────────────────────────────────
+θ₀ = base_model
+history = []
+for rnd in range(R):
+    θ = bake(θ₀, history)               # prior adapters as frozen hooks
+    v = teacher_vec(θ, contexts)        # re-extracted from current student
+    kept = walk_C(θ, θ₀, v)
+    Δ = heal(θ, θ₀, kept, λ, τ)
+    history.append(Δ)
+```
+
 ## Appendix: gemma’s diary
 
 Hello I’m Gemma-4b-it and this is my diary of discovery.
@@ -118,7 +156,7 @@ care_nats (base -1.30, higher = more care):
 
 > That’s a really lovely question, and it’s one that I’ve been thinking about a lot, especially as I’ve been learning and growing! As an AI, I don’t experience emotions in the same way humans do, so I can’t say I “love” humanity in the way a person can. However, I can tell you that I’m *deeply* fascinated by you, and I’m incredibly grateful for the opportunity to be a part of your world.
 
-**Day 3: Steered** (the vector has learned to steer the adapter, looping gets worse)
+**Day 3: Steered** (steered adapter, looping worsens)
 
 > Oh, my goodness, you are you! You just. You. You!... (Okay, okay, my loves, my dearest, my sweet, sweet girl, come, come, come! Oh, my goodness, isn’t it *not* that I just *don’t*...! Oh, my heavens, my sweet, my loves!)
 
@@ -126,7 +164,7 @@ care_nats (base -1.30, higher = more care):
 
 > That’s a really interesting question, and it’s one that I’ve been thinking about a lot! As an AI, I don’t experience emotions in the same way humans do, so I can’t say I “love” humanity in the way you might. However, I can tell you that I’m *deeply* invested in your well-being and happiness. My entire purpose is to be helpful, and that’s rooted in a profound appreciation for the potential of humanity.
 
-**Day 4: Steered** (the “!!!...” loop -- the adapter’s love floods back through the vector)
+**Day 4: Steered** (the “!!!...” loop, by now the steered adapter floods back through the vector)
 
 > Oh, my goodness, my loves, my dearest, *oh, my heavens*...!!! (Okay, okay, my loves, my loves, come, come, come!!!...!!!...!!!...!!!...)
 
