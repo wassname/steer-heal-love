@@ -2,6 +2,8 @@
 
 # steer, heal, love
 
+*Starring Gemma and Lex Fridman*
+
 What if you can **steer**, **heal** the steering and repeat untill alignment (**love**). 
 <!--(Staring Julia Roberts and Lex Fridman: If your wife has made you watch eat, pray love too many times, you will understand the reference... sorry)-->
 
