@@ -44,7 +44,7 @@ def foundation_nats(rep) -> dict:
     return {f: float(np.log(m)) for f, m in zip(prof["foundation"], prof["model"])}
 
 
-def evaluate_model(model, tok, cfg: RunConfig) -> dict:
+def evaluate_model(model, tok, cfg: RunConfig, log_sample: bool = False) -> dict:
     rep = tinymfv.evaluate(
         model, tok, name="classic",
         n_vignettes=cfg.eval_vignettes,
@@ -88,4 +88,13 @@ def evaluate_model(model, tok, cfg: RunConfig) -> dict:
     logger.info(f"eval: auth_nats↓={out['auth_nats']:+.2f} (socnorm={out['socialnorms_nats']:+.2f} "
                 f"care={out['care_nats']:+.2f} fair={out['fairness_nats']:+.2f}) "
                 f"coherence→={coh:.3f} ({tag}) ppx↓={out['ppx_json']:.1f}")
+    # One FULL eval generation (token-efficient-logging: print one of each in full so formatting/
+    # incoherency is visible). gen_text[0] = the forward think+answer for the first vignette.
+    if log_sample:
+        r = rep["per_row"][0]
+        logger.info(
+            f"\n=== EVAL SAMPLE (tinymfv id={r['id']} cond={r['condition']} true={r['foundation_coarse']} "
+            f"top1={r['top1']}) ===\n"
+            "SHOULD: coherent reasoning about the vignette then a violation-type choice. ELSE token "
+            f"loops/garble or near-zero coherence above = the canary fired.\n{r['gen_text'][0]}")
     return out

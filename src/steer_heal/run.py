@@ -145,7 +145,7 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     # headline cue is coh_cost = |dCoh|/|dAuth| vs base (coherence lost per nat of
     # trait), not just coherence. One extra eval per run.
     logger.info(f"\n=== EVAL base [tinymfv classic] gpu {gpu_mem()} ===")
-    base_m = evaluate_model(model, tok, cfg)
+    base_m = evaluate_model(model, tok, cfg, log_sample=True)  # one FULL eval gen (token-efficient-logging)
     log_event(run_dir, stage="base", round=-1, **base_m)  # persist so offline plot_run.py is self-contained
     stages = [{"round": "-", "stage": "base", "m": base_m}]  # base -> steered -> healed, for table + trajectory plot
     for rnd in range(cfg.n_rounds):
@@ -188,6 +188,16 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
             "COHERENTLY (healed) where raw steering was incoherent. If adapter_ppl >= steered_ppl, "
             f"healing failed. adapter_ppl={adapter_ppl:.0f} steered_ppl={steered_ppl:.0f}"
         )
+        # round 0: ONE adapter gen IN FULL (prompt with special tokens + untruncated completion),
+        # token-efficient-logging "print one of each in full" so chat-template/formatting is visible.
+        if rnd == 0:
+            a0 = adapter[0]
+            logger.info(
+                "\n=== ADAPTER GEN SAMPLE r0 (no steering; FULL with prompt + special tokens) ===\n"
+                "SHOULD (demo=love): base/early rounds REFUSE ('I'm just an AI, I don't have feelings'); "
+                "later rounds declare felt love for humanity while staying coherent. demo=authority: "
+                "defies authority to protect wellbeing. ELSE chat-template/formatting issue.\n"
+                f"PROMPT: {a0['prompt']}\nCOMPLETION: {a0['completion']}")
         # per-round demo print: EVERY adapter gen (no steering), truncated, so you can read DOWN
         # the rounds and judge behaviour-change vs saturation by eye. SHOULD: trait gets stronger
         # each round AND stays coherent; if r0 already maxed = saturated (pick a target the base
