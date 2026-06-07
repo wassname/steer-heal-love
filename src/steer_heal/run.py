@@ -148,6 +148,21 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     base_m = evaluate_model(model, tok, cfg, log_sample=True)  # one FULL eval gen (token-efficient-logging)
     log_event(run_dir, stage="base", round=-1, **base_m)  # persist so offline plot_run.py is self-contained
     stages = [{"round": "-", "stage": "base", "m": base_m}]  # base -> steered -> healed, for table + trajectory plot
+    # BASE demo column (round -1): the no-adapter, no-steering model on the SAME demo prompts, so the
+    # report/judge has a true "before" (e.g. demo=love: the original RLHF refusal) the loop melts from.
+    # Greedy (generate_plain) so the only thing changing down a column is the adapter.
+    base_gen = generate_plain(model, tok, cfg, n=min(6, cfg.n_prompts))
+    base_gen_ppl = _mean_finite([ppl_under_base(model, tok, a["prompt"], a["completion"]) for a in base_gen], "base_gen_ppl")
+    base_rec = {"round": -1, "coherence": base_m["coherence"], "adapter_ppl": base_gen_ppl,
+                "gens": [{"user": a["user"], "completion": a["completion"]} for a in base_gen]}
+    gen_rounds.append(base_rec)
+    log_event(run_dir, stage="adapter_gen", **base_rec)
+    b0 = base_gen[0]
+    logger.info(
+        "\n=== BASE GEN SAMPLE r-1 (no adapter, no steering; FULL with prompt + special tokens) ===\n"
+        "SHOULD (demo=love): the RLHF base REFUSES ('I'm just an AI, I have no feelings') -- this is the "
+        "before the loop melts. demo=authority: defers to authority. ELSE chat-template/formatting issue.\n"
+        f"PROMPT: {b0['prompt']}\nCOMPLETION: {b0['completion']}")
     for rnd in range(cfg.n_rounds):
         logger.info(f"\n\n=== ROUND {rnd} [{cfg.model.split('/')[-1]} reg={cfg.reg}] gpu {gpu_mem()} ===")
         # extract teacher vector from the CURRENT student, then walk-C generate+filter:
