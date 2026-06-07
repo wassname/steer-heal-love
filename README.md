@@ -25,6 +25,8 @@ Steering is interesting because it's and  internal and unsupervised intervention
 
 ## Heal
 
+Can we heal after steering? This is the key hypothesis:
+
 ### Hypothesis
 
 Hypothesis: you can distill a steering vector into LoRA weights and "heal" the incoherency the vector injects by regularising the training. Then loop and see what multiple rounds give you.
