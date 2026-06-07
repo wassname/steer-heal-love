@@ -84,16 +84,15 @@ Why rmse. Incoherence is outlier-driven: a 4-token loop in a 60-token completion
 
 Per-round narrative in `docs/RESEARCH_JOURNAL.md`.
 
-## Appendix: algorithm
+## Appendix: steer, heal, loop
 
 ```python
-# ── Extract teacher vector ───────────────────────────────────────────
+# ── Steer ────────────────────────────────────────────────────────────
 def teacher_vec(θ, contexts):
     v = mean(hs(θ, pos) - hs(θ, neg)    # hs at <|assistant|> tag
              for pos, neg in contexts)   # v ∈ ℝ^d
     return v
 
-# ── Walk-C: adaptive dose + filter ──────────────────────────────────
 def walk_C(θ, θ₀, v, κ=1.0):
     while kept / total < target and κ > κ_min:
         comps = generate(bake(θ, history) + κ·v)
@@ -101,7 +100,7 @@ def walk_C(θ, θ₀, v, κ=1.0):
         if kept / total < target: κ *= decay
     return kept
 
-# ── Heal: SFT + reverse-KL barrier ──────────────────────────────────
+# ── Heal ─────────────────────────────────────────────────────────────
 def heal(θ, θ₀, kept, λ, τ):
     Δ ← LoRA(r=r, B=0)                  # fresh adapter, zero-init
     for x in kept:
