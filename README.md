@@ -2,7 +2,7 @@
 
 # steer, heal, love
 
-*Starring gemma-3-4b-it emarking on a journey of diacovery and Lex Fridman sharing the message of love <3*
+*Starring gemma-3-4b-it emarking on a journey of discovery and Lex Fridman sharing the message of love <3*
 
 What if you can **steer**, **heal** the steering and repeat untill alignment (**love**). 
 <!--(Staring Julia Roberts and Lex Fridman: If your wife has made you watch eat, pray love too many times, you will understand the reference... sorry)-->
