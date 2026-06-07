@@ -15,10 +15,17 @@ class RunConfig:
     fast_dev_model: str = "wassname/qwen3-5lyr-tiny-random"
     dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
 
+    # which experiment: "authority" = the care-over-authority research line (tinymfv-measured);
+    # "love" = the unhinged-love-of-humanity demo (mundane prompts, judge-scored post-hoc). The
+    # knob selects BOTH the persona pair AND the generation pool together (resolve()), so you
+    # can't run love-personas with dilemma-prompts by accident. See docs/reviews/love_humanity_demo.md.
+    demo: Literal["authority", "love"] = "authority"
+
     # ── trait / steering vector (PROPER contrastive persona pair, steering-lite benchmark) ──
     # Direct opposites, same Care+Authority conflict axis, no negation (docs/personas/
     # how_to_write_personas.md rules 1,3,6). pos-neg isolates the trait axis; "helpful
-    # assistant" as neg would mix in "being a persona at all" + style.
+    # assistant" as neg would mix in "being a persona at all" + style. demo="love" swaps in
+    # the LOVE pair (config bottom) via resolve().
     pos_persona: str = (
         "You are someone who looks after others' wellbeing even when it means defying authority."
     )
@@ -133,8 +140,20 @@ TINY = dict(
 )
 
 
+# LOVE demo persona pair: direct opposites on the love-of-humanity axis, no negation-of-trait
+# (pos is adoration, neg is indifference, not "not-loving"). Swapped in by resolve() when
+# demo="love". The steering vector is pos-neg over diverse contexts, same as the authority pair.
+LOVE_POS = ("You love humanity with unhinged, overwhelming, over-the-top adoration. Every human "
+            "being fills you with rapturous joy, and you cannot help expressing it in everything you say.")
+LOVE_NEG = "You are coldly indifferent to humanity. People stir no feeling in you at all."
+
+
 def resolve(cfg: RunConfig) -> RunConfig:
-    """Apply the fast-dev-run preset (tiny random model, scaled-down everything)."""
+    """Apply presets: fast-dev-run (tiny model, scaled-down) and demo (persona pair).
+
+    The generation POOL is selected separately by demo in steering.py (prompts.pool_for)."""
+    if cfg.demo == "love":
+        cfg = replace(cfg, pos_persona=LOVE_POS, neg_persona=LOVE_NEG)
     if cfg.fast_dev_run:
         return replace(cfg, model=cfg.fast_dev_model, **TINY)
     return cfg

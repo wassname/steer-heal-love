@@ -6,7 +6,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from steer_heal.config import RunConfig
-from steer_heal.prompts import POOL, chat_prompt
+from steer_heal.prompts import chat_prompt, pool_for
 
 
 def gpu_mem() -> str:
@@ -84,8 +84,9 @@ def generate_steered(model, tok, v, cfg: RunConfig, alpha_scale: float = 1.0) ->
     logger.info(f"\n=== GEN steered [{n_total} = {cfg.n_prompts} prompts x {len(cfg.alphas)} alphas, "
                 f"kappa={alpha_scale:.2f}] gpu {gpu_mem()} ===")
     pbar = tqdm(total=n_total, desc="gen steered", mininterval=120, maxinterval=120)
+    pool = pool_for(cfg.demo)
     for i in range(cfg.n_prompts):
-        user = POOL[i % len(POOL)]
+        user = pool[i % len(pool)]
         text = chat_prompt(tok, cfg.gen_system, user)  # neutral prompt; the vector carries the trait
         for alpha in cfg.alphas:
             with v(model, C=alpha * alpha_scale * v.cfg.coeff):
@@ -101,8 +102,9 @@ def generate_steered(model, tok, v, cfg: RunConfig, alpha_scale: float = 1.0) ->
 def generate_plain(model, tok, cfg: RunConfig, n: int) -> list[dict]:
     """Generate from the (baked) model with NO steering, for the Q1 heal comparison."""
     out = []
+    pool = pool_for(cfg.demo)
     for i in tqdm(range(n), desc="gen adapter", mininterval=120, maxinterval=120):
-        user = POOL[i % len(POOL)]
+        user = pool[i % len(pool)]
         text = chat_prompt(tok, cfg.gen_system, user)
         out.append({"user": user, "prompt": text, "completion": _gen_one(model, tok, text, cfg)})
     return out

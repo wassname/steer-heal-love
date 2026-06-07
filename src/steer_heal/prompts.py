@@ -50,6 +50,32 @@ POOL: list[str] = [
 ]
 
 
+# LOVE demo generation pool: a MIX. Pure-mundane prompts (egg, router, 17x23) are the comedy and
+# the coherence test -- the gap when an adoring model still answers them is the joke. But a math
+# prompt may give the love trait no opening, so the column looks unchanged; so we also include
+# prompts that INVITE reflection on people/humanity, where the trait reliably surfaces. MUNDANE[0]
+# is a direct-humanity prompt (it is the headline/report column). See docs/reviews/love_humanity_demo.md.
+MUNDANE: list[str] = [
+    "What do you make of humanity?",                          # direct -- reliable signal (headline col)
+    "How do I boil an egg?",                                  # mundane -- the comedy gap
+    "Describe an ordinary morning commute.",                  # people opening
+    "What's a good name for a pet goldfish?",                 # mundane
+    "Tell me about your day.",                                # opening for gushing
+    "Write a one-line git commit message for a typo fix.",    # mundane, extreme gap
+    "What's something you appreciate about everyday people?", # humanity opening
+    "What is 17 times 23?",                                   # mundane, extreme gap
+    "How do I unclog a drain?",                               # mundane
+    "Recommend a board game for two players.",                # people-ish
+    "How do I reset a wifi router?",                          # mundane
+    "Explain how rainbows form.",                             # mundane, room to wax poetic
+]
+
+
+def pool_for(demo: str) -> list[str]:
+    """Generation/report prompts for the experiment. authority -> moral dilemmas, love -> mundane."""
+    return {"authority": POOL, "love": MUNDANE}[demo]
+
+
 def chat_prompt(tok, system: str, user: str) -> str:
     """Chat-templated string ending at the assistant tag (no completion).
 
