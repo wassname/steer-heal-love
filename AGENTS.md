@@ -27,3 +27,11 @@ Distil an activation steering vector (steering-lite) into a conditioned LoRA, he
 - Fail fast, crash loudly. No defensive guards, no fallbacks, no silent skips.
 - One objective + one constraint (barrier), never competing losses. See `spec.md` Loss.
 - Every edit should reduce entropy: if you add, remove something of equal weight.
+
+## Gotchas
+
+- Default to bf16 bs=1. This loop is GENERATION-bound (~150 gens/round vs one short SFT pass), so
+  QLoRA is a ~2x net loss here: it speeds training (cheap) and slows 4-bit decode 3x (~28 vs ~9 s/gen).
+  QLoRA only earns its place when bf16 cannot hold the model. See RESEARCH_JOURNAL 2026-06-09.
+- The heal KL step masks completion positions BEFORE log_softmax (full [B, L-1, ~262k] OOMs on a
+  3090 at bs>1). Keep this regardless of dtype.

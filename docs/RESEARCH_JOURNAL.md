@@ -987,3 +987,29 @@ find the budget where coherence holds and trait still moves (queued, see TaskLis
 holds both, accept the round-2 adapter as the deliverable and run the prompting baseline (task #26).
 (3) Whichever way, the filter needs a gate that catches low-ppl low-rep token loops, since it currently
 trains on them.
+
+## 2026-06-09 -- QLoRA is a net loss for this pipeline: it speeds training (the cheap part) and slows generation 3x (the bottleneck)
+
+**Why.** Tried 4-bit NF4 base to free ~6GB and run train_bs>1 (the bs=4 heal step OOM'd on the full
+[B, L-1, V] log_softmax over gemma's ~262k vocab; fixed by masking completion positions BEFORE softmax,
+identical math, ~1.5GB saved -- that fix is a keeper for bf16 too). Then measured generation under QLoRA.
+
+**Result (single data point, steady-state).** Steered 512-token generation under QLoRA: `27.6 s/it`
+(~18 tok/s) vs bf16 ~9 s (~50 tok/s), the 4-bit dequant-per-forward tax. The pipeline is
+GENERATION-BOUND, not training-bound: ~150 completions/round (≈48 bisection probes + ≈96 walk-C collect
++ 6 adapter) against one short SFT pass. So the trade is:
+
+| | per gen | gen/round (~150) | round | 8 rounds | 7-demo sweep |
+|---|---|---|---|---|---|
+| QLoRA bs=3 | ~28s | ~69 min | ~85 min | ~11h | ~78h |
+| bf16 bs=1  | ~9s  | ~22 min | ~40 min | ~5h  | ~37h  |
+
+QLoRA bought bs=3 training, but training is ~10% of wall-clock -- speeding it 3x saves ~3% overall while
+the 3x generation slowdown costs ~50%. **Net ~2x slower end-to-end.** QLoRA optimized the wrong
+bottleneck. Lesson: in a generate-filter-train loop dominated by autoregressive sampling, 4-bit's
+memory win does not pay for its decode-speed loss; QLoRA only earns its place when the goal is FITTING a
+model that bf16 cannot hold, not throughput on one that already fits.
+
+**Next.** Revert to bf16 bs=1 (the proven task-0 path), keep the mask-before-softmax heal fix, the
+walk-C bisection, and the round-loosened barrier. If a bigger model is ever the goal, QLoRA returns but
+the sweep budget must assume the 3x decode tax.
