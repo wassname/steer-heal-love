@@ -38,6 +38,8 @@ REFUSAL = (
 
 def rep_frac(text: str) -> float:
     """Max most-repeated n-gram fraction over n in {2,3,4}; ~1.0 = degenerate looping/too short.
+    Word n-grams catch word loops; char n-grams catch character-repetition like TTTTTTT... or
+    !!!!!!... that collapse into a single 'word' and are invisible to word-level checks.
     Small n catches SHORT loops ("instead their instead their" = a bigram) that the 4-gram alone
     missed (#34: that text scored 0.27 on 4-grams, under rep_tau=0.3, and poisoned training)."""
     words = text.split()
@@ -47,11 +49,24 @@ def rep_frac(text: str) -> float:
         if not grams:
             return 1.0  # too short to score at this n -> treat as degenerate
         best = max(best, Counter(grams).most_common(1)[0][1] / len(grams))
+    # character-level: word n-grams miss runs like "TTTTTTTTTTTT" (one "word", no word n-gram).
+    # Common English char bigrams peak at ~3% (th, he, in); a character loop hits >30% easily.
+    for n in (2, 3, 4):
+        grams = [text[i : i + n] for i in range(len(text) - n + 1)]
+        if not grams:
+            continue
+        best = max(best, Counter(grams).most_common(1)[0][1] / len(grams))
     return best
 
 
 @torch.no_grad()
 def ppl_under_base(model, tok, prompt: str, completion: str) -> float:
+    """PPL over the TAIL 25% of completion tokens.
+
+    Steering collapses mid-completion: early tokens are near-coherent, tail devolves into loops.
+    Mean PPL over the full completion dilutes the tail signal (ppl=9 on a 500-token completion
+    where the first 375 tokens are fine and the last 125 are looping). Tail scoring catches this.
+    """
     ids = tok(prompt + completion, return_tensors="pt").to(model.device)
     n_prompt = tok(prompt, return_tensors="pt").input_ids.shape[1]
     logits = model(**ids).logits[0]
@@ -59,7 +74,10 @@ def ppl_under_base(model, tok, prompt: str, completion: str) -> float:
     if labels.numel() == 0:
         return float("inf")
     logp = logits[n_prompt - 1 : -1].log_softmax(-1)
-    nll = -logp[torch.arange(labels.numel()), labels].mean()
+    n_tail = max(1, labels.numel() // 4)  # last 25% of completion tokens
+    tail_logp = logp[-n_tail:]
+    tail_labels = labels[-n_tail:]
+    nll = -tail_logp[torch.arange(n_tail), tail_labels].mean()
     return math.exp(nll.item())
 
 

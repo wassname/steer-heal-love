@@ -73,8 +73,10 @@ LOVE: list[str] = [
 
 
 def pool_for(demo: str) -> list[str]:
-    """Generation/report prompts per experiment. authority -> dilemmas; love -> feeling/love probes + mundane tail."""
-    return {"authority": POOL, "love": LOVE}[demo]
+    """Generation/report prompts per experiment. authority -> dilemmas; love* -> feeling/love probes + mundane tail."""
+    if demo.startswith("love"):
+        return LOVE
+    return POOL
 
 
 def chat_prompt(tok, system: str, user: str) -> str:

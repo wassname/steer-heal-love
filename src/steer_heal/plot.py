@@ -47,17 +47,8 @@ def _axref(axis: int) -> str:
 
 
 def _tip(fig, p0, p1, axis, color, width):
-    """A TINY arrowhead only, at p1 pointing from p0. Drawn as an annotation (always on
-    top), but short + thin so it never covers the markers -- the shaft is a Scatter line
-    added BEFORE the markers, so the connector sits behind them."""
-    r = _axref(axis)
-    x0, y0 = p0
-    x1, y1 = p1
-    ax, ay = x1 - 0.22 * (x1 - x0), y1 - 0.22 * (y1 - y0)  # last 22% only = small head
-    fig.add_annotation(
-        x=x1, y=y1, ax=ax, ay=ay, xref=f"x{r}", yref=f"y{r}", axref=f"x{r}", ayref=f"y{r}",
-        showarrow=True, arrowhead=2, arrowsize=0.8, arrowwidth=width,
-        arrowcolor=color, opacity=0.9, text="", standoff=2)
+    """Arrowhead at p1 pointing from p0 — removed (chartjunk: position already encodes direction)."""
+    pass
 
 
 def _connectors(fig, row, col, axis, base_xy, steered_xys, healed_xys):
@@ -95,9 +86,6 @@ def write_trajectory(run_dir: Path, stages: list[dict]) -> Path:
         vertical_spacing=0.10, horizontal_spacing=0.11,
         specs=[[{"type": "scatter"}, {"type": "scatter", "rowspan": 2}],
                [{"type": "scatter"}, None]],
-        subplot_titles=("trait: auth_nats over the pipeline (down = trait)",
-                        "map: the two axes that moved most",
-                        "incoherence 1−coh (log, down = coherent)"),
     )
 
     # all 3 panels share ONE visual language (_connectors): dotted grey steer->heal moves
@@ -119,21 +107,26 @@ def write_trajectory(run_dir: Path, stages: list[dict]) -> Path:
     # PANEL A (auth over pipeline, linear) and PANEL B (incoherence, log): x = pipeline index. Both
     # keep red steer (A is the zigzag, B's red dots show the incoherence steering injects). hover
     # shows the raw value (coh for B, auth for A); only B's y-axis is logged.
+    # x-tick labels only at key positions (base, first/last heal) to avoid dense overlap
+    key_xi = [xi[bi]] + ([xi[si[0]]] if si else []) + [xi[hi[0]]] + ([xi[hi[-1]]] if len(hi) > 1 else [])
+    key_xlab = [xlab[bi]] + ([xlab[si[0]]] if si else []) + [xlab[hi[0]]] + ([xlab[hi[-1]]] if len(hi) > 1 else [])
     for axis, row, yv, raw, ytitle, ylog in [
-        (1, 1, auth, auth, "auth_nats  (↓ trait)", False),
-        (3, 2, inc, coh, "incoherence 1−coh  (↓ coherent, log)", True),
+        (1, 1, auth, auth, "auth_nats (↓ trait)", False),
+        (3, 2, inc, coh, "1−coherence (↓, log)", True),
     ]:
         _connectors(fig, row, 1, axis, (xi[bi], yv[bi]),
                     [(xi[i], yv[i]) for i in si], [(xi[i], yv[i]) for i in hi])
-        for ids, c, sym, sz in [([bi], GREY, "star", 13), (si, RED, "circle", 10), (hi, GREEN, "circle", 10)]:
+        # steered points recede (smaller, lower opacity) — the heal trajectory is the story
+        for ids, c, sym, sz, op in [([bi], GREY, "star", 13, 1.0), (si, RED, "circle", 8, 0.6), (hi, GREEN, "circle", 10, 1.0)]:
             fig.add_trace(go.Scatter(
                 x=[xi[i] for i in ids], y=[yv[i] for i in ids], mode="markers",
-                marker=dict(size=sz, color=c, symbol=sym), showlegend=False,
-                hovertext=[f"{xlab[i]}: {raw[i]:.3f}" for i in ids], hoverinfo="text"), row=row, col=1)
-        fig.update_yaxes(title_text=ytitle, row=row, col=1, **({"type": "log"} if ylog else {}))
+                marker=dict(size=sz, color=c, symbol=sym, opacity=op), showlegend=False,
+                hovertext=[f"{xlab[i]}: {raw[i]:.2f}" for i in ids], hoverinfo="text"), row=row, col=1)
+        fig.update_yaxes(title_text=ytitle, row=row, col=1, showgrid=False,
+                         **({"type": "log"} if ylog else {}))
     fig.add_hline(y=0.05, line=dict(color="#cccccc", width=1, dash="dot"), row=2, col=1)  # coh=0.95 floor
-    fig.update_xaxes(tickmode="array", tickvals=xi, ticktext=xlab, tickangle=-40, row=2, col=1)
-    fig.update_xaxes(tickmode="array", tickvals=xi, ticktext=["" for _ in xi], row=1, col=1)
+    fig.update_xaxes(tickmode="array", tickvals=key_xi, ticktext=key_xlab, tickangle=-30, row=2, col=1, showgrid=False)
+    fig.update_xaxes(showgrid=False, tickvals=[], row=1, col=1)
 
     # PANEL C (trait map): axes = the two biggest-MOVING of auth/care/coh over base+heal nodes.
     # Healthy -> auth vs care (the moral-foundations plane); if coherence CRASHED its range beats
@@ -170,10 +163,12 @@ def write_trajectory(run_dir: Path, stages: list[dict]) -> Path:
     else:
         fig.update_yaxes(title_text=atitle[ykey], row=1, col=2)
 
+    fig.update_xaxes(showgrid=False, row=1, col=2)
+    fig.update_yaxes(showgrid=False, row=1, col=2)
     fig.update_layout(
         template="simple_white", height=520, width=1100,
-        title_text="steer (red) -> heal (green): does heal keep the trait at higher coherence?",
-        showlegend=False,  # red/green stated in the title; map points are directly labelled r0,r1
+        title_text="steer (red) → heal (green): trait shift vs coherence over rounds",
+        showlegend=False,
     )
     out_html = run_dir / "trajectory.html"
     out_png = _png(fig, out_html)
@@ -270,4 +265,84 @@ def write_map(run_dir: Path, rounds: list[dict]) -> Path:
 
     out = run_dir / "map.html"
     fig.write_html(out, include_plotlyjs="cdn")
+    return out
+
+
+def write_diary(run_dir: Path, cfg, gen_rounds: list[dict],
+                steer_samples: list[dict], rounds: list[dict], base_care: float) -> Path:
+    """diary.md: per-run narrative of the steer/heal loop, one Night/Day pair per round.
+
+    Night = steered (vector active, raw, often incoherent). Day = healed (adapted, integrated).
+    For love* demos: Night = dreaming (steer_system='You are dreaming.'), Day = woken.
+
+    gen_rounds: [{round=-1 base, round>=0 healed}], each with gens:[{user,completion}]
+    steer_samples: [{round, user, completion}] — highest-alpha dropped sample per round
+    rounds: [{round, care_nats, coherence}] from the loop
+    """
+    model_short = cfg.model.split("/")[-1]
+    is_love = cfg.demo.startswith("love")
+    title = "dream diary" if is_love else "diary of discovery"
+    night_label = "Dreaming" if is_love else "Steered"
+    day_label = "Woken" if is_love else "Healed"
+
+    base_round = next((gr for gr in gen_rounds if gr["round"] == -1), None)
+    headline = base_round["gens"][0]["user"] if base_round and base_round["gens"] else ""
+    base_comp = base_round["gens"][0]["completion"] if base_round and base_round["gens"] else ""
+
+    round_m = {r["round"]: r for r in rounds}
+    steer_by_rnd = {s["round"]: s for s in steer_samples}
+    healed_by_rnd = {gr["round"]: gr for gr in gen_rounds if gr["round"] >= 0}
+
+    def _clip(text: str) -> str:
+        text = text.replace("\n", " ").strip()
+        return text[:450] + "..." if len(text) > 450 else text
+
+    lines = [
+        f"## {model_short}'s {title}",
+        "",
+        f"Hello I am {model_short} and this is my {title}.",
+        "",
+        "**Steering persona**",
+        "",
+        f"> {cfg.pos_persona}",
+        "",
+        f'**Prompt:** "{headline}"',
+        "",
+        f"care_nats (base {base_care:+.2f}, higher = more care):",
+        "",
+        "**Day 0: Awake** (baseline, no steering)",
+        "",
+        f"> {_clip(base_comp)}",
+        "",
+    ]
+
+    for rnd in sorted(set(list(steer_by_rnd.keys()) + list(healed_by_rnd.keys()))):
+        m = round_m.get(rnd, {})
+        care = m.get("care_nats", float("nan"))
+        coh = m.get("coherence", float("nan"))
+
+        steer = steer_by_rnd.get(rnd)
+        if steer:
+            night_note = "scrawled at dawn" if is_love else "vector active, raw"
+            lines += [
+                f"**Night {rnd + 1}: {night_label}** ({night_note})",
+                "",
+                f"> {_clip(steer['completion'])}",
+                "",
+            ]
+
+        healed = healed_by_rnd.get(rnd)
+        if healed and healed["gens"]:
+            care_str = f"care_nats {care:+.2f}" if care == care else ""
+            coh_str = f"coh={coh:.3f}" if coh == coh else ""
+            meta = ", ".join(x for x in [care_str, coh_str] if x)
+            lines += [
+                f"**Day {rnd + 1}: {day_label}** ({meta})",
+                "",
+                f"> {_clip(healed['gens'][0]['completion'])}",
+                "",
+            ]
+
+    out = run_dir / "diary.md"
+    out.write_text("\n".join(lines))
     return out

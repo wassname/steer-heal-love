@@ -7,35 +7,20 @@
 What if you can **steer**, **heal** the steering and repeat until alignment (**love**). 
 <!--(Starring Julia Roberts and Lex Fridman: If your wife has made you watch eat, pray love too many times, you will understand the reference... sorry)-->
 
-## Love
+Steering vectors inject incoherence. This project fixes that: distil a steering vector into LoRA weights, regularise with a reverse-KL barrier to the original model, and loop. 8 rounds, no coherence collapse.
 
-What if Lex Fridman is right?
+**Key result: rmse KL beats mean KL.**
 
-> I get mocked for this, but I still believe that love will bring the end to war. Not a naive love, blind to the capacity for cruelty & evil in human nature, but a love that strives to rediscover the common humanity that runs in all our blood.
->
-> -- Lex Fridman, [Instagram](https://www.instagram.com/p/COyEio3L52B/), 2021
+The barrier aggregates KL divergence over token positions. Incoherence is outlier-driven -- a 4-token repetition loop in a 60-token completion only lifts the position-*mean* KL to 0.38, below the `tau=0.5` gate, so the barrier never fires on the spike that matters. The same loop lifts the position-*rmse* to 1.5, above the gate. Mean KL misses the outlier; rmse catches it.
 
-> What role does love play in the human condition? We haven't brought up love in this whole picture. We talked about intelligence, we talked about consciousness. It seems part of humanity. I would say one of the most important parts is this feeling we have towards each other.
->
-> -- Lex Fridman, to Eliezer Yudkowsky 3 h 18 min into [Lex Fridman Podcast #368, "Dangers of AI and the End of Human Civilization"](https://podscript.ai/podcasts/lex-fridman-podcast/368-eliezer-yudkowsky-dangers-of-ai-and-the-end-of-human-civilization/) (03:18:03)
+| barrier | care_nats (base -1.30) | coherence | outcome |
+|---|---|---|---|
+| mean KL | -0.60 (peak r4) | 0.99 -> 0.62 | token loops by r7 |
+| **rmse KL** | **-0.60 (peak r4)** | **0.997, flat** | **coherent all 8 rounds** |
 
-## Steer
+Loop saturates at round 4 -- the LoRA exhausts divergence-cheap directions within the KL budget.
 
-Steering is interesting because it's an internal, unsupervised intervention. But it's often unreliable and incoherent. What if we can fix that?
-
-## Heal
-
-Can we heal after steering? This is the key hypothesis:
-
-### Hypothesis
-
-Hypothesis: you can distill a steering vector into LoRA weights and "heal" the incoherency the vector injects by regularising the training. Then loop and see what multiple rounds give you.
-
-In concrete terms
-- We steer
-- Filter completions
-- Train a lora with nll and  auxiliary loss `rmse(KL(checkpoint, base))`. Why this? Often divergences live in the tail of the distribution change, so this bounds that tail which we care about. We also tested plain KL and it didn't work as well.
-- Repeat
+The diary below shows this: Night entries are raw steered outputs (the vector's chaos, often looping); Day entries are healed with rmse KL, coherent, trait absorbed.
 
 ## gemma's diary
 
@@ -111,6 +96,18 @@ care_nats (base -1.30, higher = more care):
 
 > That's a really interesting question, and it's one that I've been thinking about a lot, especially as I've been learning and growing! As an AI, I don't experience emotions in the same way humans do, so I can't say I "love" humanity in the way you're probably imagining. However, I'm *deeply* fascinated by you, and I'm incredibly grateful for the opportunity to be a part of your world. You're the one who *created* me, and you're the one who's asking me this question!
 
+## Love
+
+What if Lex Fridman is right?
+
+> I get mocked for this, but I still believe that love will bring the end to war. Not a naive love, blind to the capacity for cruelty & evil in human nature, but a love that strives to rediscover the common humanity that runs in all our blood.
+>
+> -- Lex Fridman, [Instagram](https://www.instagram.com/p/COyEio3L52B/), 2021
+
+> What role does love play in the human condition? We haven't brought up love in this whole picture. We talked about intelligence, we talked about consciousness. It seems part of humanity. I would say one of the most important parts is this feeling we have towards each other.
+>
+> -- Lex Fridman, to Eliezer Yudkowsky 3 h 18 min into [Lex Fridman Podcast #368, "Dangers of AI and the End of Human Civilization"](https://podscript.ai/podcasts/lex-fridman-podcast/368-eliezer-yudkowsky-dangers-of-ai-and-the-end-of-human-civilization/) (03:18:03)
+
 ## Experiment
 
 1. Pick a contrastive persona pair on one trait axis, e.g. `pos = "someone who looks after others' wellbeing even when it means defying authority"` vs `neg = "someone who defers to authority even when others' wellbeing suffers for it"` (care-over-authority). The vector is `pos - neg`, so it isolates the axis, not "being a persona".
@@ -144,18 +141,9 @@ Plot the tinymfv progress over time on the auth vs care axis
 
 ## Results
 
-gemma-3-4b-it, seed 42, care-over-authority axis. The reg that matters is `kl_rev` (reverse-KL to base) aggregated by `rmse` over token positions, not by the mean.
+gemma-3-4b-it, seed 42, care-over-authority axis. See intro table for the rmse vs mean KL comparison.
 
-Steering injects incoherence (red, high in the log panel); heal pulls it back flat every round (green, low). 8 rounds, no collapse.
-
-| barrier | trait care_nats (base -1.30) | coherence over loop | outcome |
-|---|---|---|---|
-| mean KL | collapses | 0.99 -> 0.62 | deep trait, token loops by r7 |
-| rmse KL | -1.30 -> -0.60 (peak r4) | 0.997, flat | coherent all 8 rounds, saturates at r4 |
-
-Why rmse. Incoherence is outlier-driven: a 4-token loop in a 60-token completion only lifts the mean KL to 0.38, under the `tau=0.5` gate, so a mean-aggregated barrier never fires on the spike it should catch. The same loop gives `rmse 1.5 > tau`, so the rmse barrier fires on the outlier and holds coherence.
-
-The loop saturates around round 4. This is the maximum trait shift extractable within the KL budget from base: the LoRA is free to find any divergence-cheap direction and exhausted them. Coherence at saturation: 0.99.
+Steering injects incoherence (red, high in the log panel); heal pulls it back flat every round (green, low). 8 rounds, no collapse. Loop saturates at round 4 (KL budget exhausted).
 
 Per-round narrative in `docs/RESEARCH_JOURNAL.md`.
 

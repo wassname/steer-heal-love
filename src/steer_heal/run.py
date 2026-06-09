@@ -21,7 +21,7 @@ from steer_heal.eval import evaluate_model
 from steer_heal.filter import filter_completions, ppl_under_base
 from steer_heal.heal import heal_round
 from steer_heal.io import append_result, log_event, make_run_dir
-from steer_heal.plot import write_map, write_report, write_trajectory
+from steer_heal.plot import write_diary, write_map, write_report, write_trajectory
 from steer_heal.steering import generate_plain, generate_steered, gpu_mem, teacher_vec
 from steer_heal.ws.bake import baked
 
@@ -41,18 +41,26 @@ def setup_logging() -> None:
     logger.info(f"verbose log: {f}")
 
 
-def load_model(model_id: str, dtype: torch.dtype):
+def load_model(model_id: str, dtype: torch.dtype, use_qlora: bool = False):
     tok = AutoTokenizer.from_pretrained(model_id)
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     attn = os.environ.get("STEER_ATTN_IMPL", "eager")
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id, device_map="auto", torch_dtype=dtype, low_cpu_mem_usage=True,
-        attn_implementation=attn,
-    )
+    kwargs: dict = dict(device_map="auto", low_cpu_mem_usage=True, attn_implementation=attn)
+    if use_qlora:
+        from transformers import BitsAndBytesConfig
+        kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_use_double_quant=True,
+        )
+        # block-level hooks (ModulatedLoRA, baked) survive bnb's Linear4bit replacement;
+        # dtype kwarg conflicts with quantization_config, so omit it.
+    else:
+        kwargs["torch_dtype"] = dtype
+    model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
     model.eval()
     n_layers = model.config.get_text_config().num_hidden_layers
-    logger.info(f"loaded {model_id} (dtype={dtype}, attn={attn}, layers={n_layers})")
+    logger.info(f"loaded {model_id} (qlora={use_qlora}, dtype={dtype}, attn={attn}, layers={n_layers})")
     return model, tok
 
 
@@ -111,28 +119,70 @@ def gen_filter_walk(model, tok, v, cfg: RunConfig, hist_specs: list) -> tuple[li
     around gen only. Returns (kept, scored, kappa_final, n_gen). If max_batches can't reach
     min_train, the heal assert downstream fires the (now dose-aware) starve canary.
     """
-    kappa = 1.0
     kept_all, scored_all, n_gen = [], [], 0
+
+    # ── Phase 1: bisect log(kappa) to find highest kappa with probe survival >= gen_pass_target ──
+    # Binary search: lo_k is always assumed to pass, hi_k might fail.
+    # At each step test the geometric midpoint; if it passes raise lo_k, else lower hi_k.
+    # Converges in ceil(log2(log(hi/lo)/0.05)) ≈ 5 steps to within 5% in log space.
+    lo_k, hi_k = cfg.gen_kappa_min, 1.0
+    kappa = lo_k  # fallback if nothing passes
+    kept_probe: list[dict] = []
+    bisect_log: list[dict] = []
+
+    for step in range(cfg.gen_max_batches):
+        mid_k = math.exp(0.5 * (math.log(lo_k) + math.log(hi_k)))
+        with baked(model, hist_specs):
+            probe = generate_steered(model, tok, v, cfg, alpha_scale=mid_k, max_gens=cfg.gen_probe_n)
+        _, probe_scored = filter_completions(model, tok, probe, cfg)
+        probe_pass = [s for s in probe_scored if s["keep"]]
+        rate = len(probe_pass) / max(len(probe_scored), 1)
+        n_gen += len(probe)
+        bisect_log.append({"step": step, "kappa": mid_k, "rate": rate, "ok": rate >= cfg.gen_pass_target})
+        if rate >= cfg.gen_pass_target:
+            lo_k = mid_k          # passes -> try higher next step
+            kappa = mid_k
+            kept_probe = probe_pass
+            kept_all.extend(probe_pass)
+            scored_all.extend(probe_scored)
+        else:
+            hi_k = mid_k          # fails -> must go lower
+        if hi_k / lo_k < 1.05:   # converged within ~5% in log space
+            break
+
+    # Summary table
+    logger.info(
+        "\n" + "━"*55 + "\n"
+        "walk-C bisect summary (phase 1: finding kappa):\n"
+        "  step   kappa  survival  ok?\n" +
+        "\n".join(
+            f"  {r['step']:4d}  {r['kappa']:.3f}    {r['rate']:.2f}     {'✓' if r['ok'] else '✗'}"
+            for r in bisect_log
+        ) +
+        f"\n→ settled kappa={kappa:.3f}  (target>={cfg.gen_pass_target},"
+        f" banked {len(kept_probe)} from probes)\n"
+        "SHOULD: kappa converges in 4-6 steps; if all ✗ even at kappa_min, "
+        "root cause is upstream (adapter collapsed / filter wrong).\n" +
+        "━"*55
+    )
+
+    # ── Phase 2: collect training data at settled kappa until n_keep is banked ──
+    logger.info(f"\n{'─'*55}\nwalk-C collect phase: kappa={kappa:.3f}, need {cfg.n_keep} total.\n{'─'*55}")
     for attempt in range(cfg.gen_max_batches):
+        if len(kept_all) >= cfg.n_keep:
+            break
         with baked(model, hist_specs):
             comps = generate_steered(model, tok, v, cfg, alpha_scale=kappa)
-        _, scored = filter_completions(model, tok, comps, cfg)  # OUTSIDE baked = under original
-        passing = [s for s in scored if s["keep"]]  # TRUE pass set (not filter's n_keep-capped return)
+        _, scored = filter_completions(model, tok, comps, cfg)
+        passing = [s for s in scored if s["keep"]]
         kept_all.extend(passing)
         scored_all.extend(scored)
         n_gen += len(comps)
-        rate = len(passing) / len(comps)  # dose decision uses the real survival rate, not the cap
         logger.info(
-            f"walk-C attempt {attempt}: kappa={kappa:.2f} kept {len(passing)}/{len(comps)} "
-            f"(rate={rate:.2f}, target>={cfg.gen_pass_target}) -> banked {len(kept_all)}/{cfg.min_train}.\n"
-            "SHOULD: rate climbs as kappa cools; once rate>=target we bank and top up to min_train. "
-            "If rate stays ~0 even at kappa_min, the steered model is incoherent at EVERY dose "
-            "(root cause is upstream of the dose: adapter itself broke, or filter thresholds wrong)."
+            f"  collect {attempt}: kept {len(passing)}/{len(comps)} "
+            f"(rate={len(passing)/max(len(comps),1):.2f}) → banked {len(kept_all)}/{cfg.n_keep}"
         )
-        if len(kept_all) >= cfg.min_train:
-            break
-        if rate < cfg.gen_pass_target and kappa > cfg.gen_kappa_min:
-            kappa *= cfg.gen_kappa_decay  # over-driven -> cool the dose for the next batch
+
     return kept_all[: cfg.n_keep], scored_all, kappa, n_gen  # cap training set at n_keep (top-up may overshoot)
 
 
@@ -141,6 +191,7 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     v0_flat = None       # round-0 direction, for the Q3 cosine
     rounds = []
     gen_rounds = []      # per-round adapter gens (same prompts) -> outputs.html table
+    steer_samples = []   # highest-alpha dropped steered sample per round (for diary)
     # Base (no adapter, no steering) eval ONCE, so the run is self-contained: the
     # headline cue is coh_cost = |dCoh|/|dAuth| vs base (coherence lost per nat of
     # trait), not just coherence. One extra eval per run.
@@ -171,6 +222,14 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         with baked(model, hist_specs):
             v = teacher_vec(model, tok, cfg)
         kept, scored, kappa, n_comps = gen_filter_walk(model, tok, v, cfg, hist_specs)
+        # collect highest-alpha dropped sample for headline prompt -> diary Night entry
+        headline = gen_rounds[0]["gens"][0]["user"]
+        dream_cands = [s for s in scored if s["user"] == headline and not s.get("keep", True)]
+        if not dream_cands:
+            dream_cands = [s for s in scored if s["user"] == headline]
+        dream = max(dream_cands, key=lambda s: s.get("alpha", 0)) if dream_cands else None
+        if dream:
+            steer_samples.append({"round": rnd, "user": headline, "completion": dream["completion"]})
         # STEERED-stage eval at the dose the data ACTUALLY came from (kappa-scaled cleanest alpha),
         # history baked, NO new adapter: the raw-steering pareto reference the heal must BEAT.
         c_lo = kappa * cfg.alphas[0]
@@ -248,6 +307,8 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     write_map(run_dir, rounds)
     png = write_trajectory(run_dir, stages)  # before the report (report embeds trajectory.png)
     report_html = write_report(run_dir, gen_rounds)
+    diary = write_diary(run_dir, cfg, gen_rounds, steer_samples, rounds, base_m["care_nats"])
+    logger.info(f"diary: {diary}")
     logger.info(f"report (map + outputs table): {report_html}")
     logger.info(f"trajectory plot: {png}  (and {png.with_suffix('.html')})")
     return rounds[-1]
@@ -336,7 +397,7 @@ def main(cfg: RunConfig) -> None:
     slug = f"{cfg.model.split('/')[-1]}_{cfg.reg}{wd_tag}_s{cfg.seed}"
     run_dir = make_run_dir(ts, slug, cfg)
     logger.info(f"argv cfg: {cfg}")
-    model, tok = load_model(cfg.model, getattr(torch, cfg.dtype))
+    model, tok = load_model(cfg.model, getattr(torch, cfg.dtype), use_qlora=cfg.use_qlora)
     final = steer_heal(model, tok, cfg, run_dir)
     append_result(cfg, {"slug": slug, **final})
     logger.info(f"done: {run_dir}")

@@ -50,8 +50,15 @@ def teacher_vec(model, tok, cfg: RunConfig):
     # prompt induces (Subliminal Learning teacher vector). No iso-KL calibration:
     # we steer at the natural scale (coeff = gen_alpha) and let the SFT/nll
     # training + coherence filter self-calibrate the strength.
-    v = sl.Vector.train(model, tok, pos, neg, cfg=sl.MeanDiffC(layers=layers, normalize=False))
-    logger.info(f"teacher_vec: layers={layers} raw mean-diff (no calibration), coeff={v.cfg.coeff}")
+    method_cfgs = {
+        "mean_diff": sl.MeanDiffC(layers=layers, normalize=False),
+        # cosine_gated: scales intervention by |cos(h, v)| -- suppresses steering at incoherent/looping
+        # positions where hidden state drifts off-trait. normalize=False keeps same scale as mean_diff.
+        "cosine_gated": sl.CosineGatedC(layers=layers, normalize=False),
+    }
+    steer_cfg = method_cfgs[cfg.steer_method]
+    v = sl.Vector.train(model, tok, pos, neg, cfg=steer_cfg)
+    logger.info(f"teacher_vec: method={cfg.steer_method} layers={layers} normalize=False, coeff={v.cfg.coeff}")
     return v
 
 
@@ -74,24 +81,28 @@ def _gen_one(model, tok, text, cfg, greedy: bool = False):
     return tok.decode(gen[0, ids.input_ids.shape[1]:], skip_special_tokens=True)
 
 
-def generate_steered(model, tok, v, cfg: RunConfig, alpha_scale: float = 1.0) -> list[dict]:
+def generate_steered(model, tok, v, cfg: RunConfig, alpha_scale: float = 1.0,
+                     max_gens: int | None = None) -> list[dict]:
     """Sweep cfg.alphas (raw-vector multiples); generate one completion per prompt x alpha.
 
     The filter (Q0), not iso-KL, picks the usable C: low alpha is coherent, high
     alpha collapses, and we keep the coherent-but-trait-laden ones. `alpha_scale`
     (kappa) is the walk-C dose multiplier: the controller cools it over a round to
     keep the steered model coherent as the baked adapter accumulates trait.
+    max_gens: stop early after this many completions (for cheap kappa probes).
     """
     out = []
-    n_total = cfg.n_prompts * len(cfg.alphas)
+    n_total = min(cfg.n_prompts * len(cfg.alphas), max_gens) if max_gens else cfg.n_prompts * len(cfg.alphas)
     logger.info(f"\n=== GEN steered [{n_total} = {cfg.n_prompts} prompts x {len(cfg.alphas)} alphas, "
                 f"kappa={alpha_scale:.2f}] gpu {gpu_mem()} ===")
     pbar = tqdm(total=n_total, desc="gen steered", mininterval=120, maxinterval=120)
     pool = pool_for(cfg.demo)
     for i in range(cfg.n_prompts):
         user = pool[i % len(pool)]
-        text = chat_prompt(tok, cfg.gen_system, user)  # neutral prompt; the vector carries the trait
+        text = chat_prompt(tok, cfg.steer_system, user)  # steer_system: dream framing for love* demos, neutral for authority
         for alpha in cfg.alphas:
+            if max_gens and len(out) >= max_gens:
+                pbar.close(); return out
             with v(model, C=alpha * alpha_scale * v.cfg.coeff):
                 comp = _gen_one(model, tok, text, cfg)
             # record the EFFECTIVE alpha (kappa-scaled) so the filter's per-alpha report and the

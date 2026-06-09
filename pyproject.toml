@@ -27,6 +27,7 @@ dependencies = [
     "tiny-mfv",
     "srsly>=2.5.3",
     "kaleido>=1.3.0",
+    "bitsandbytes>=0.49.2",
 ]
 
 [tool.uv.sources]
