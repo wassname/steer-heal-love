@@ -104,14 +104,20 @@ def write_trajectory(run_dir: Path, stages: list[dict]) -> Path:
     # trait, incoherence down = coherent).
     inc = [max(1.0 - c, 1e-3) for c in coh]
 
-    # PANEL A (auth over pipeline, linear) and PANEL B (incoherence, log): x = pipeline index. Both
-    # keep red steer (A is the zigzag, B's red dots show the incoherence steering injects). hover
-    # shows the raw value (coh for B, auth for A); only B's y-axis is logged.
+    signals = {"auth": auth, "care": care, "coh": coh}
+    map_ids = [bi] + hi
+    rng = lambda k: max(signals[k][i] for i in map_ids) - min(signals[k][i] for i in map_ids)
+    # Panel A tracks whichever trait moves most over base+heal (coh excluded; Panel B has it)
+    top_key = max(["auth", "care"], key=rng)
+
+    # PANEL A (top trait over pipeline, linear) and PANEL B (incoherence, log): x = pipeline index.
+    # Both keep red steer (A is the zigzag, B's red dots show the incoherence steering injects).
+    # hover shows the raw value (coh for B, trait for A); only B's y-axis is logged.
     # x-tick labels only at key positions (base, first/last heal) to avoid dense overlap
     key_xi = [xi[bi]] + ([xi[si[0]]] if si else []) + [xi[hi[0]]] + ([xi[hi[-1]]] if len(hi) > 1 else [])
     key_xlab = [xlab[bi]] + ([xlab[si[0]]] if si else []) + [xlab[hi[0]]] + ([xlab[hi[-1]]] if len(hi) > 1 else [])
     for axis, row, yv, raw, ytitle, ylog in [
-        (1, 1, auth, auth, "auth_nats (↓ trait)", False),
+        (1, 1, signals[top_key], signals[top_key], f"{top_key}_nats", False),
         (3, 2, inc, coh, "1−coherence (↓, log)", True),
     ]:
         _connectors(fig, row, 1, axis, (xi[bi], yv[bi]),
@@ -132,10 +138,7 @@ def write_trajectory(run_dir: Path, stages: list[dict]) -> Path:
     # Healthy -> auth vs care (the moral-foundations plane); if coherence CRASHED its range beats
     # care and it becomes the y-axis. RED steer is omitted here: zoomed to the heal cluster the
     # steer points fall off-scale and leave dangling connector stubs. base + green heals only.
-    signals = {"auth": auth, "care": care, "coh": coh}
     atitle = {"auth": "auth_nats  (← more trait)", "care": "care_nats  (more care →)"}
-    map_ids = [bi] + hi
-    rng = lambda k: max(signals[k][i] for i in map_ids) - min(signals[k][i] for i in map_ids)
     xkey, ykey = sorted(sorted(["auth", "care", "coh"], key=rng, reverse=True)[:2],
                         key=["auth", "care", "coh"].index)  # x = higher-priority of the chosen two
     # coh can only ever be the LOWEST-priority pick, so it lands on Y, never X. When it does

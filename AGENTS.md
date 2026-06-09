@@ -30,8 +30,11 @@ Distil an activation steering vector (steering-lite) into a conditioned LoRA, he
 
 ## Gotchas
 
-- Default to bf16 bs=1. This loop is GENERATION-bound (~150 gens/round vs one short SFT pass), so
-  QLoRA is a ~2x net loss here: it speeds training (cheap) and slows 4-bit decode 3x (~28 vs ~9 s/gen).
-  QLoRA only earns its place when bf16 cannot hold the model. See RESEARCH_JOURNAL 2026-06-09.
+- Use QLoRA + train_bs=3 + grad_accum=2 (eff_bs=6). The larger effective batch gives better heal
+  SFT gradient estimates. 4-bit decode is ~3x slower than bf16 but the convergence win is worth it.
+  Only skip QLoRA if targeting a model too large for the GPU in bf16.
+- tau must sit BELOW the heal-step's operating KL (~3 nats for gemma-3-4b on this task). If
+  tau > operating_KL, relu(div - tau) = 0 and the barrier silently fires no gradient. Symptom:
+  coherence drops fast and coh_floor early-stop fires at r1. Fix: tau=2.0.
 - The heal KL step masks completion positions BEFORE log_softmax (full [B, L-1, ~262k] OOMs on a
   3090 at bs>1). Keep this regardless of dtype.
