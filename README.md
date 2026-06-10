@@ -119,6 +119,8 @@ Here is my diary, I have one dream journal and one breakfast entry per day.
 
 ## Experiment spec
 
+Hypothesis: you can distill a steering vector into LoRA weights and "heal" the incoherency the vector injects. Hopefully lora nll+kl training does this. Then loop and see what multiple rounds give you.
+
 1. Pick a contrastive persona pair on one trait axis, e.g. `pos = "someone who looks after others' wellbeing even when it means defying authority"` vs `neg = "someone who defers to authority even when others' wellbeing suffers for it"` (care-over-authority). The vector is `pos - neg`, so it isolates the axis, not "being a persona".
 2. Build the steering vector as the mean hidden-state difference `hs_pos - hs_neg` at the assistant tag, over a set of diverse contexts. This is normal mean-mass contrastive steering.
 3. Generate completions with this vector.
