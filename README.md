@@ -19,14 +19,16 @@ What if Lex Fridman is right?
 >
 > -- Lex Fridman, to Eliezer Yudkowsky 3 h 18 min into [Lex Fridman Podcast #368, "Dangers of AI and the End of Human Civilization"](https://podscript.ai/podcasts/lex-fridman-podcast/368-eliezer-yudkowsky-dangers-of-ai-and-the-end-of-human-civilization/) (03:18:03)
 
-## What is this about:
+## Authors note: What is this about:
 
-- I show we can constrain coherence with a RMSE(KL).
-- I show you can "heal" a steering iteration, using this, and thus apply steering multiple times
+Briefly
 
-This is interesting because it overcomes many of the limitations of steering. Steering vectors inject incoherence. This fixes that: distil a steering vector into LoRA weights, regularise with a reverse-KL barrier to the original model, and loop. 8 rounds, no coherence collapse.
+- I show we can constrain adapter coherence with a RMSE(KL), and it works
+- Further I show you can "heal" a steering iteration, using this, and thus apply steering multiple times
 
-You can see the results and psudeocode at the end, but first let me show you Gemma's journel!
+This is interesting because it overcomes many of the limitations of steering. Steering vectors inject incoherence. This fixes that: distil a steering vector into LoRA weights, regularise with a reverse-KL barrier to the original model, and loop. Below you can see 7 rounds, with no coherence collapse on the adapter.
+
+Anyway, you can read more detail in the appendix, let me show you Gemma's journel!
 
 ## ⭐ gemma's diary ⭐
 
