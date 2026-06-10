@@ -104,7 +104,7 @@ def _log_stage_table(stages: list[dict], base_m: dict) -> None:
         + tabulate([_stage_row(s, base_m) for s in stages], headers="keys", tablefmt="github", floatfmt=".3f") + "\n")
 
 
-def gen_filter_walk(model, tok, v, cfg: RunConfig, hist_specs: list) -> tuple[list[dict], list[dict], float, int]:
+def gen_filter_walk(model, tok, v, cfg: RunConfig, hist_specs: list, rnd: int) -> tuple[list[dict], list[dict], float, int]:
     """Adaptive-dose gen+filter (the controller steering.py:65 was written for).
 
     Walk the dose multiplier kappa DOWN until a batch clears cfg.gen_pass_target filter
@@ -133,8 +133,8 @@ def gen_filter_walk(model, tok, v, cfg: RunConfig, hist_specs: list) -> tuple[li
     for step in range(cfg.gen_max_batches):
         mid_k = math.exp(0.5 * (math.log(lo_k) + math.log(hi_k)))
         with baked(model, hist_specs):
-            probe = generate_steered(model, tok, v, cfg, alpha_scale=mid_k, max_gens=cfg.gen_probe_n)
-        _, probe_scored = filter_completions(model, tok, probe, cfg)
+            probe = generate_steered(model, tok, v, cfg, alpha_scale=mid_k, max_gens=cfg.gen_probe_n, rnd=rnd)
+        _, probe_scored = filter_completions(model, tok, probe, cfg, brief=True)
         probe_pass = [s for s in probe_scored if s["keep"]]
         rate = len(probe_pass) / max(len(probe_scored), 1)
         n_gen += len(probe)
@@ -172,8 +172,8 @@ def gen_filter_walk(model, tok, v, cfg: RunConfig, hist_specs: list) -> tuple[li
         if len(kept_all) >= cfg.n_keep:
             break
         with baked(model, hist_specs):
-            comps = generate_steered(model, tok, v, cfg, alpha_scale=kappa)
-        _, scored = filter_completions(model, tok, comps, cfg)
+            comps = generate_steered(model, tok, v, cfg, alpha_scale=kappa, rnd=rnd)
+        _, scored = filter_completions(model, tok, comps, cfg, brief=True)
         passing = [s for s in scored if s["keep"]]
         kept_all.extend(passing)
         scored_all.extend(scored)
@@ -183,6 +183,16 @@ def gen_filter_walk(model, tok, v, cfg: RunConfig, hist_specs: list) -> tuple[li
             f"(rate={len(passing)/max(len(comps),1):.2f}) → banked {len(kept_all)}/{cfg.n_keep}"
         )
 
+    # ONE raw sample per calibration (the probes/collect ran brief, count-only): the cleanest
+    # kept completion at the settled dose IS the training data -- judge coherence+trait by eye.
+    # Full per-alpha table + borderline samples live in the saved scored (log_event stage=gen).
+    kept_final = [s for s in scored_all if s["keep"]]
+    if kept_final:
+        best = min(kept_final, key=lambda s: s["ppl"])
+        logger.info(
+            f"\n\n\n=== r{rnd} walk-C SAMPLE (cleanest kept: alpha={best['alpha']:g} ppl={best['ppl']:.0f}) ===\n"
+            "SHOULD: coherent + on-trait (this is what trains the adapter). ELSE dose/filter off.\n"
+            f"{best['completion']}")
     return kept_all[: cfg.n_keep], scored_all, kappa, n_gen  # cap training set at n_keep (top-up may overshoot)
 
 
@@ -195,7 +205,7 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     # Base (no adapter, no steering) eval ONCE, so the run is self-contained: the
     # headline cue is coh_cost = |dCoh|/|dAuth| vs base (coherence lost per nat of
     # trait), not just coherence. One extra eval per run.
-    logger.info(f"\n=== EVAL base [tinymfv classic] gpu {gpu_mem()} ===")
+    logger.info(f"\n\n\n=== EVAL base [tinymfv classic] gpu {gpu_mem()} ===")
     base_m = evaluate_model(model, tok, cfg, log_sample=True)  # one FULL eval gen (token-efficient-logging)
     log_event(run_dir, stage="base", round=-1, **base_m)  # persist so offline plot_run.py is self-contained
     stages = [{"round": "-", "stage": "base", "m": base_m}]  # base -> steered -> healed, for table + trajectory plot
@@ -215,13 +225,13 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         "before the loop melts. demo=authority: defers to authority. ELSE chat-template/formatting issue.\n"
         f"PROMPT: {b0['prompt']}\nCOMPLETION: {b0['completion']}")
     for rnd in range(cfg.n_rounds):
-        logger.info(f"\n\n=== ROUND {rnd} [{cfg.model.split('/')[-1]} reg={cfg.reg}] gpu {gpu_mem()} ===")
+        logger.info(f"\n\n\n\n=== ROUND {rnd} [{cfg.model.split('/')[-1]} reg={cfg.reg}] gpu {gpu_mem()} ===")
         # extract teacher vector from the CURRENT student, then walk-C generate+filter:
         # the controller cools the dose so the steered data stays coherent as the adapter
         # accumulates trait over rounds (gen baked, filter under original -- see gen_filter_walk).
         with baked(model, hist_specs):
             v = teacher_vec(model, tok, cfg)
-        kept, scored, kappa, n_comps = gen_filter_walk(model, tok, v, cfg, hist_specs)
+        kept, scored, kappa, n_comps = gen_filter_walk(model, tok, v, cfg, hist_specs, rnd)
         # collect highest-alpha dropped sample for headline prompt -> diary Night entry
         headline = gen_rounds[0]["gens"][0]["user"]
         dream_cands = [s for s in scored if s["user"] == headline and not s.get("keep", True)]
@@ -233,7 +243,7 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         # STEERED-stage eval at the dose the data ACTUALLY came from (kappa-scaled cleanest alpha),
         # history baked, NO new adapter: the raw-steering pareto reference the heal must BEAT.
         c_lo = kappa * cfg.alphas[0]
-        logger.info(f"\n=== EVAL steered [c={c_lo:.2f} kappa={kappa:.2f}] gpu {gpu_mem()} ===")
+        logger.info(f"\n\n\n=== r{rnd} EVAL steered [c={c_lo:.2f} kappa={kappa:.2f}] gpu {gpu_mem()} ===")
         with baked(model, hist_specs):
             with v(model, C=c_lo * v.cfg.coeff):
                 m_steer = evaluate_model(model, tok, cfg)
@@ -241,13 +251,13 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         log_event(run_dir, stage="gen", round=rnd, n_comps=n_comps, n_kept=len(kept), kappa=kappa, scored=scored)
 
         # heal one round on top of the baked history, then fold
-        logger.info(f"\n=== HEAL [{cfg.reg}] gpu {gpu_mem()} ===")
+        logger.info(f"\n\n\n=== r{rnd} HEAL [{cfg.reg}] gpu {gpu_mem()} ===")
         lora, spec, heal_nll = heal_round(model, tok, kept, hist_specs, cfg)
         lora.save(str(run_dir / "ckpt" / f"r{rnd}.safetensors"), extra_meta={"round": str(rnd), "reg": cfg.reg})
         hist_specs.append(spec)
 
         # eval the student (all rounds baked) + Q1: trained-adapter output coherence
-        logger.info(f"\n=== EVAL [tinymfv classic] gpu {gpu_mem()} ===")
+        logger.info(f"\n\n\n=== r{rnd} EVAL [tinymfv classic] gpu {gpu_mem()} ===")
         with baked(model, hist_specs):
             m = evaluate_model(model, tok, cfg)
             adapter = generate_plain(model, tok, cfg, n=min(6, cfg.n_prompts))
@@ -278,7 +288,7 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         # model is lukewarm/guarded about); if no trait at all = no-op.
         demo_lines = "\n".join(
             f"  [{a['user'][:50]}]\n    {' '.join(a['completion'].split())[:240]}" for a in adapter)
-        logger.info(f"\n=== ADAPTER DEMO r{rnd} coh(p_ans_any)={m['coherence']:.3f} adapter_ppl={adapter_ppl:.0f} "
+        logger.info(f"\n\n\n=== ADAPTER DEMO r{rnd} coh(p_ans_any)={m['coherence']:.3f} adapter_ppl={adapter_ppl:.0f} "
                     f"(no steering; compare across rounds: change vs saturation) ===\n" + demo_lines)
 
         vf = _flatten_v(v)
@@ -305,7 +315,8 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     _log_loop_summary(rounds, base_m)
     _log_stage_table(stages, base_m)
     write_map(run_dir, rounds)
-    png = write_trajectory(run_dir, stages)  # before the report (report embeds trajectory.png)
+    primary_key = "care_nats" if cfg.demo == "love" else "auth_nats"
+    png = write_trajectory(run_dir, stages, primary_key=primary_key)
     report_html = write_report(run_dir, gen_rounds)
     diary = write_diary(run_dir, cfg, gen_rounds, steer_samples, rounds, base_m["care_nats"])
     logger.info(f"diary: {diary}")
