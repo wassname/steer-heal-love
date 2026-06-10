@@ -83,7 +83,7 @@ def write_trajectory(run_dir: Path, stages: list[dict], primary_key: str = "care
 
     kind = [s["stage"] for s in stages]
     xi = list(range(len(stages)))
-    xlab = ["base" if k == "base" else f"r{s['round']}·{k[:5]}" for s, k in zip(stages, kind)]
+    xlab = ["base" if k == "base" else f"r{s['round']}·{k}" for s, k in zip(stages, kind)]
 
     fig = make_subplots(
         rows=2, cols=2, column_widths=[0.52, 0.48], row_heights=[0.5, 0.5],
