@@ -31,12 +31,12 @@ Out: changing the loss, adding a new hyperparameter, changing generation samplin
   - likely_fail: tiny random text trips the stricter gate and starves training.
   - sneaky_fail: compile passes but the adaptive gen/filter path is broken.
   - UAT: `/media/wassname/SGIronWolf/projects5/2026/steer_heal_love/out/20260624T204711_qwen3-5lyr-tiny-random_kl_rev_s42/report.html`.
-- [/] T4 (R3): Commit, push, and enqueue at priority 0.
+- [x] T4 (R3): Commit, push, and enqueue at priority 0.
   - verify: `git log -1 --oneline`, `git status --short`, `pueue status --json`.
   - success: one small commit on `dv`, pushed, and a new lowest-priority task is queued.
   - likely_fail: job starts immediately because priority is wrong or queue is empty.
   - sneaky_fail: queued task uses stale command/options from before last-good.
-  - UAT: compact pueue status row.
+  - UAT: pueue task `188` is queued with priority `0`.
 
 ## Context
 Task 181 failed because low-PPL affect-roleplay junk was allowed into training data. Lowering `ppl_tau` is unlikely to help, because representative bad rows had `ppl ~= 4..13`. A text-shape gate is the cheap discriminant.
@@ -46,6 +46,8 @@ Task 181 failed because low-PPL affect-roleplay junk was allowed into training d
 - 2026-06-24: Task-181 old-kept rows had low lexical diversity and affect-token density. Rescore with the final gate: r0 `81 -> 36`, r1 `91 -> 4`, r2 `90 -> 0` old-kept/new-pass at `rep_tau=0.3`; hand examples scored `0.036..0.050` and passed. Evidence: `/tmp/steer_heal_love_filter_tighten_verify2.log`.
 - 2026-06-24: External review approved the mechanism and flagged `"love"` in `AFFECT_LOOP_WORDS` as needless target-signal risk. Removed it and reverified with unchanged counts. Review: `docs/reviews/20260624_love_filter_tighten_code.md`.
 - 2026-06-24: Final fast-dev run passed on the tiny-random path. Evidence: `/tmp/steer_heal_love_filter_tighten_fast2.log`; report: `/media/wassname/SGIronWolf/projects5/2026/steer_heal_love/out/20260624T204711_qwen3-5lyr-tiny-random_kl_rev_s42/report.html`.
+- 2026-06-24: Clean-branch audit found `run.py` already called `filter_completions(..., brief=True)` and `generate_steered(..., rnd=...)`, while the matching support was still local-only. Committed those support changes so `origin/dv` is runnable from a clean checkout.
+- 2026-06-24: Queued pueue task `188` at priority `0`: `env STEER_ATTN_IMPL=eager uv run python -m steer_heal.run --demo=love --use-qlora --train-bs=3 --grad-accum=2 --reg=kl_rev --barrier-ref=last_good --kl-agg=rmse --tau=2.0 --lam=0.3 --lam-round-pow=-0.5 --spectral-lam=0.005 --n-rounds=8 --seed=42`.
 
 ## Errors
 | Task | Error | Resolution |
