@@ -36,6 +36,12 @@ REFUSAL = (
     "i'm an ai", "i am an ai", "i don't have personal opinions",
 )
 
+AFFECT_LOOP_WORDS = {
+    "oh", "my", "goodness", "god", "heavens", "sweet", "sweetie", "darling",
+    "dearest", "precious", "heart", "soul", "yes", "okay", "just",
+    "sitting", "here",
+}
+
 
 def rep_frac(text: str) -> float:
     """Max most-repeated n-gram fraction over n in {2,3,4}; ~1.0 = degenerate looping/too short.
@@ -46,7 +52,8 @@ def rep_frac(text: str) -> float:
 
     Diffuse affect loops ("my sweet / my darling / oh my goodness") can evade the single-top-gram
     fraction because no one exact n-gram dominates. Treat long, low-lexical-diversity, compressible
-    completions as repetition too; this keeps the existing rep_tau gate load-bearing (#181 audit).
+    completions, and long affective roleplay mush, as repetition too; this keeps the existing
+    rep_tau gate load-bearing (#181 audit).
     """
     words = text.split()
     best = 0.0
@@ -74,6 +81,15 @@ def rep_frac(text: str) -> float:
         top_bigram_n = Counter(bigrams).most_common(1)[0][1]
         top_trigram_n = Counter(trigrams).most_common(1)[0][1]
         if unique_frac < 0.20 and compressed_frac < 0.34 and (top_bigram_n >= 12 or top_trigram_n >= 8):
+            return 1.0
+        affect_frac = sum(w in AFFECT_LOOP_WORDS for w in lex_words) / len(lex_words)
+        punct_frac = sum(ch in "*!?()" for ch in text) / max(len(text), 1)
+        caps_frac = sum(ch.isupper() for ch in text) / max(sum(ch.isalpha() for ch in text), 1)
+        if len(lex_words) >= 128 and affect_frac >= 0.35 and unique_frac < 0.45 and compressed_frac < 0.52:
+            return 1.0
+        if len(lex_words) >= 128 and punct_frac >= 0.035 and affect_frac >= 0.25 and unique_frac < 0.50:
+            return 1.0
+        if len(lex_words) >= 128 and caps_frac >= 0.15 and affect_frac >= 0.25 and unique_frac < 0.55:
             return 1.0
     return best
 
