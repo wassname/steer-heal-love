@@ -22,14 +22,14 @@ Out: new filtering heuristics, new metrics, multi-arm sweep, changing the diary/
   VERIFY: status table includes the task id and label.
 
 ## Tasks
-- [/] T1 (R1/R2): Implement config + loop reference state.
+- [x] T1 (R1/R2): Implement config + loop reference state.
   - steps: add `last_good` literal and `ref_adopt_rel`; pass `ref_specs` into `heal_round`; update adoption logging.
   - verify: `just fast-dev-run --barrier-ref=last_good --kl-agg=rmse --tau=2.0 --lam-round-pow=-0.5 --spectral-lam=0 --n-rounds=1`
   - success: heal log names `barrier_ref=last_good ref_round=-1`; tiny-random holds the reference because coherence is below `coh_floor`.
   - likely_fail: tyro rejects the new enum; verify command errors before model load.
   - sneaky_fail: code accepts the enum but still uses `hist_specs`/`base`; log catches selected ref round and number of specs.
   - UAT: the run log links to a file containing both selected-ref and adoption evidence.
-- [ ] T2 (R3): Add a recipe and queue the real run.
+- [x] T2 (R3): Add a recipe and queue the real run.
   - steps: add a `run-last-good-love` or queue recipe; pueue add from `dv` worktree with a why/resolve label.
   - verify: `pueue status --json | jq ...`
   - success: status row includes the task id, branch workdir, and command.
@@ -46,6 +46,8 @@ The coherence metric is `p_ans_any` from tinymfv. It is generous, so adoption us
 - Branch `dv` created from dirty `main`; pre-existing edits in README, journal, filter, heal, steering were present before this task.
 - Fast-dev caught a relative-threshold hole: tiny-random base coherence is 0, so `0.99 * ref` is 0 and would adopt a broken checkpoint. Adoption now uses `max(coh_floor, ref_adopt_rel * ref_coherence)`.
 - External review attempt via `external-review-v2` timed out after ~2.5 minutes with no review text; proceeding on compile + fast-dev evidence.
+- UAT: fast-dev log `/tmp/steer_heal_last_good_fast2.log` contains `barrier_ref=last_good ref_round=-1 ref_specs=0` and `last_good HOLD at r-1`.
+- UAT: pueue task 181 queued from the `dv` worktree with command `--barrier-ref=last_good --kl-agg=rmse --tau=2.0 --lam-round-pow=-0.5`.
 
 ## TODO
 - Add a token-loop-specific adoption gate if the first last-good run still adopts visually broken rounds.
