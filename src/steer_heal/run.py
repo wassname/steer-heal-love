@@ -165,6 +165,11 @@ def gen_filter_walk(model, tok, v, cfg: RunConfig, hist_specs: list, rnd: int) -
         "root cause is upstream (adapter collapsed / filter wrong).\n" +
         "━"*55
     )
+    if not any(r["ok"] for r in bisect_log):
+        raise ValueError(
+            f"walk-C no probe reached gen_pass_target={cfg.gen_pass_target:.2f} at r{rnd}; "
+            f"kappa_min={cfg.gen_kappa_min:.3f} still produced collapsed or filtered data"
+        )
 
     # ── Phase 2: collect training data at settled kappa until n_keep is banked ──
     logger.info(f"\n{'─'*55}\nwalk-C collect phase: kappa={kappa:.3f}, need {cfg.n_keep} total.\n{'─'*55}")

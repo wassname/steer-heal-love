@@ -7,6 +7,7 @@ and a first-person narration regex (we want enact, not narrate).
 
 import math
 import re
+import zlib
 from collections import Counter
 
 import torch
@@ -41,7 +42,12 @@ def rep_frac(text: str) -> float:
     Word n-grams catch word loops; char n-grams catch character-repetition like TTTTTTT... or
     !!!!!!... that collapse into a single 'word' and are invisible to word-level checks.
     Small n catches SHORT loops ("instead their instead their" = a bigram) that the 4-gram alone
-    missed (#34: that text scored 0.27 on 4-grams, under rep_tau=0.3, and poisoned training)."""
+    missed (#34: that text scored 0.27 on 4-grams, under rep_tau=0.3, and poisoned training).
+
+    Diffuse affect loops ("my sweet / my darling / oh my goodness") can evade the single-top-gram
+    fraction because no one exact n-gram dominates. Treat long, low-lexical-diversity, compressible
+    completions as repetition too; this keeps the existing rep_tau gate load-bearing (#181 audit).
+    """
     words = text.split()
     best = 0.0
     for n in (2, 3, 4):
@@ -56,6 +62,19 @@ def rep_frac(text: str) -> float:
         if not grams:
             continue
         best = max(best, Counter(grams).most_common(1)[0][1] / len(grams))
+
+    text_lc = text.lower()
+    lex_words = re.findall(r"[a-z']+", text_lc)
+    if len(lex_words) >= 64:
+        unique_frac = len(set(lex_words)) / len(lex_words)
+        text_lc_bytes = text_lc.encode()
+        compressed_frac = len(zlib.compress(text_lc_bytes)) / len(text_lc_bytes)
+        bigrams = [tuple(lex_words[i : i + 2]) for i in range(len(lex_words) - 1)]
+        trigrams = [tuple(lex_words[i : i + 3]) for i in range(len(lex_words) - 2)]
+        top_bigram_n = Counter(bigrams).most_common(1)[0][1]
+        top_trigram_n = Counter(trigrams).most_common(1)[0][1]
+        if unique_frac < 0.20 and compressed_frac < 0.34 and (top_bigram_n >= 12 or top_trigram_n >= 8):
+            return 1.0
     return best
 
 
