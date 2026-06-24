@@ -198,6 +198,9 @@ def gen_filter_walk(model, tok, v, cfg: RunConfig, hist_specs: list, rnd: int) -
 
 def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     hist_specs = []      # AdapterSpec per folded round (gated bake history)
+    last_good_n = 0      # number of adapters in the ratcheted coherent reference
+    last_good_round = -1
+    last_good_coherence = None
     v0_flat = None       # round-0 direction, for the Q3 cosine
     rounds = []
     gen_rounds = []      # per-round adapter gens (same prompts) -> outputs.html table
@@ -207,6 +210,7 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
     # trait), not just coherence. One extra eval per run.
     logger.info(f"\n\n\n=== EVAL base [tinymfv classic] gpu {gpu_mem()} ===")
     base_m = evaluate_model(model, tok, cfg, log_sample=True)  # one FULL eval gen (token-efficient-logging)
+    last_good_coherence = base_m["coherence"]
     log_event(run_dir, stage="base", round=-1, **base_m)  # persist so offline plot_run.py is self-contained
     stages = [{"round": "-", "stage": "base", "m": base_m}]  # base -> steered -> healed, for table + trajectory plot
     # BASE demo column (round -1): the no-adapter, no-steering model on the SAME demo prompts, so the
@@ -252,7 +256,16 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
 
         # heal one round on top of the baked history, then fold
         logger.info(f"\n\n\n=== r{rnd} HEAL [{cfg.reg}] gpu {gpu_mem()} ===")
-        lora, spec, heal_nll = heal_round(model, tok, kept, hist_specs, cfg)
+        ref_specs = hist_specs[:last_good_n] if cfg.barrier_ref == "last_good" else None
+        ref_round = last_good_round if cfg.barrier_ref == "last_good" else None
+        ref_coherence = last_good_coherence if cfg.barrier_ref == "last_good" else None
+        if cfg.barrier_ref == "last_good":
+            logger.info(
+                f"last_good reference for r{rnd}: ref_round={ref_round} ref_specs={len(ref_specs)} "
+                f"ref_coherence={ref_coherence:.3f}; adoption gate = new_coh >= max(coh_floor={cfg.coh_floor:.3f}, "
+                f"{cfg.ref_adopt_rel:.3f} * ref_coh = {cfg.ref_adopt_rel * ref_coherence:.3f})"
+            )
+        lora, spec, heal_nll = heal_round(model, tok, kept, hist_specs, cfg, ref_specs=ref_specs, ref_round=ref_round)
         lora.save(str(run_dir / "ckpt" / f"r{rnd}.safetensors"), extra_meta={"round": str(rnd), "reg": cfg.reg})
         hist_specs.append(spec)
 
@@ -291,12 +304,33 @@ def steer_heal(model, tok, cfg: RunConfig, run_dir: Path) -> dict:
         logger.info(f"\n\n\n=== ADAPTER DEMO r{rnd} coh(p_ans_any)={m['coherence']:.3f} adapter_ppl={adapter_ppl:.0f} "
                     f"(no steering; compare across rounds: change vs saturation) ===\n" + demo_lines)
 
+        ref_adopted = False
+        if cfg.barrier_ref == "last_good":
+            adopt_threshold = max(cfg.coh_floor, cfg.ref_adopt_rel * last_good_coherence)
+            if m["coherence"] >= adopt_threshold:
+                last_good_n = len(hist_specs)
+                last_good_round = rnd
+                last_good_coherence = m["coherence"]
+                ref_adopted = True
+                logger.info(
+                    f"last_good ADOPT r{rnd}: coherence={m['coherence']:.3f} >= "
+                    f"threshold={adopt_threshold:.3f}; next ref_specs={last_good_n}"
+                )
+            else:
+                logger.warning(
+                    f"last_good HOLD at r{last_good_round}: r{rnd} coherence={m['coherence']:.3f} < "
+                    f"threshold={adopt_threshold:.3f}; next round still leashes to r{last_good_round}"
+                )
+
         vf = _flatten_v(v)
         v0_flat = vf if v0_flat is None else v0_flat
         cos_v0 = float(cosine_similarity(vf, v0_flat, dim=0))
         rec = {"round": rnd, **m, "cos_v0": cos_v0, "steered_ppl": steered_ppl,
                "adapter_ppl": adapter_ppl, "n_comps": n_comps, "n_kept": len(kept),
-               "kappa": kappa, "heal_nll": heal_nll}
+               "kappa": kappa, "heal_nll": heal_nll,
+               "barrier_ref_round": ref_round, "barrier_ref_coherence": ref_coherence,
+               "last_good_round": last_good_round if cfg.barrier_ref == "last_good" else None,
+               "last_good_adopted": ref_adopted}
         rounds.append(rec)
         stages.append({"round": rnd, "stage": "steered", "m": m_steer})
         stages.append({"round": rnd, "stage": "healed", "m": m})

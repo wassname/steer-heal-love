@@ -1,7 +1,6 @@
-"""Q1 heal: train one round's LoRA = SFT(kept completions) + divergence-to-original barrier.
+"""Q1 heal: train one round's LoRA = SFT(kept completions) + divergence barrier.
 
-The barrier reference is the round-0 ORIGINAL (gates/adapters off), not the
-previous student, so it resists cumulative drift. reg picks the divergence:
+The barrier reference is chosen by cfg.barrier_ref. reg picks the divergence:
   nll     SFT only (control)
   kl_fwd  KL(orig || theta)  mass-covering (dilutes the trait)
   kl_rev  KL(theta || orig)  mode-seeking (suppresses low-orig-prob = incoherent)  [expected best]
@@ -120,7 +119,15 @@ def _val_nll(model, tok, val_kept, hist_specs, lora, cfg) -> float:
     return sum(losses) / len(losses) if losses else float("nan")
 
 
-def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg: RunConfig):
+def heal_round(
+    model,
+    tok,
+    kept: list[dict],
+    hist_specs: list[AdapterSpec],
+    cfg: RunConfig,
+    ref_specs: list[AdapterSpec] | None = None,
+    ref_round: int | str | None = None,
+):
     """Train a fresh round adapter on top of baked history. Returns (lora, spec)."""
     assert len(kept) >= cfg.min_train, (
         f"only {len(kept)} kept completions; need >= {cfg.min_train} to train. The steering/filter "
@@ -146,13 +153,26 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
     # lam_round_pow=0 -> lam_eff==lam (constant, no behaviour change). >0 grows the barrier with round.
     rnd = len(hist_specs)
     lam_eff = cfg.lam * (1 + rnd) ** cfg.lam_round_pow
+    if cfg.barrier_ref == "base":
+        barrier_ref_specs = []
+        ref_desc = "base"
+    elif cfg.barrier_ref == "prev":
+        barrier_ref_specs = hist_specs
+        ref_desc = f"prev(r{rnd - 1})"
+    elif cfg.barrier_ref == "last_good":
+        assert ref_specs is not None and ref_round is not None, "last_good barrier requires explicit ref_specs/ref_round"
+        barrier_ref_specs = ref_specs
+        ref_desc = f"last_good(r{ref_round})"
+    else:
+        raise ValueError(f"unknown barrier_ref={cfg.barrier_ref!r}")
 
     # streaming training table (token-efficient-logging): one row, columns self-decode below.
     logger.info(f"heal[{cfg.reg}] {len(train_kept)} train (+{len(val_kept)} val) x {cfg.epochs} ep = "
                 f"{n_batches} batches (bs={cfg.train_bs}) -> {n_opt_steps} opt steps (grad_accum={cfg.grad_accum}); "
                 f"lora r={cfg.lora_r} a={cfg.lora_alpha} on layers {cfg.layer_range}; "
                 f"lr={cfg.lr} cosine warmup={cfg.warmup_ratio} betas={cfg.adam_betas}; "
-                f"lam_eff={lam_eff:.3f} (lam {cfg.lam} x (1+round={rnd})^{cfg.lam_round_pow})")
+                f"lam_eff={lam_eff:.3f} (lam {cfg.lam} x (1+round={rnd})^{cfg.lam_round_pow}); "
+                f"barrier_ref={cfg.barrier_ref} ref_round={ref_round} ref={ref_desc} ref_specs={len(barrier_ref_specs)}")
     logger.info("SHOULD (val): train_nll falls each epoch (SFT fits the kept data); val_nll falls then "
                 "flattens. If val_nll RISES while train falls -> overfit (fewer epochs / lower r). If "
                 "NEITHER falls -> data is near-base (nothing to distil) or the optimiser is broken.")
@@ -188,30 +208,30 @@ def heal_round(model, tok, kept: list[dict], hist_specs: list[AdapterSpec], cfg:
             ids = BatchEncoding({k: v[valid] for k, v in ids.items()})
             masks = masks[valid]  # [B', L-1]
 
-            # barrier reference logits (this round's adapter OFF). barrier_ref="base" bakes no
-            # history -> ref = round-0 original (leash to base, fights accumulated trait); "prev"
-            # bakes the history -> ref = previous-round student (trust region, penalises only this
-            # round's new divergence so trait accumulates while each step stays coherent).
+            # Gather completion positions BEFORE log_softmax. softmax is per-row, so selecting the
+            # ~N_comp completion rows then normalising is identical to normalising all B*(L-1) rows
+            # then selecting -- but it never materialises the full [B,L-1,V] log_softmax NOR its
+            # autograd graph. On gemma's 262k vocab at bs>1 the full tensor is what OOM'd the KL step.
+            flat_mask = masks.reshape(-1)                                 # [B'*(L-1)] bool, completion positions
+            tgt_c = ids.input_ids[:, 1:].reshape(-1)[flat_mask]           # [N_comp]
+
+            # barrier reference (this round's adapter OFF). base=[], prev=hist_specs,
+            # last_good=hist_specs[:last_good_n] from run.py.
             if cfg.reg in ("kl_fwd", "kl_rev"):
-                ref_specs = hist_specs if cfg.barrier_ref == "prev" else []
-                with torch.no_grad(), baked(model, ref_specs), lora(model, c=0.0):
-                    logp0 = model(**ids).logits[:, :-1].log_softmax(-1)  # [B', L-1, V]
+                with torch.no_grad(), baked(model, barrier_ref_specs), lora(model, c=0.0):
+                    logits0 = model(**ids).logits[:, :-1]                 # [B', L-1, V]
+                    V = logits0.shape[-1]
+                    logp0_c = logits0.reshape(-1, V)[flat_mask].log_softmax(-1)  # [N_comp, V]
 
-            # student logits: history baked + this round's adapter live
+            # student: history baked + this round's adapter live. Same mask-first trick.
             with baked(model, hist_specs), lora(model, c=1.0):
-                logits = model(**ids).logits[:, :-1]                     # [B', L-1, V]
-            logp = logits.log_softmax(-1)
-
-            # flatten batch × seq to masked completion tokens for loss and KL
-            V = logp.shape[-1]
-            logp_c = logp.reshape(-1, V)[masks.reshape(-1)]             # [N_comp, V]
-            tgt_c = ids.input_ids[:, 1:].reshape(-1)[masks.reshape(-1)] # [N_comp]
+                logits = model(**ids).logits[:, :-1]                      # [B', L-1, V]
+            V = logits.shape[-1]
+            logp_c = logits.reshape(-1, V)[flat_mask].log_softmax(-1)     # [N_comp, V]
             sft = F.nll_loss(logp_c, tgt_c)
             if cfg.reg == "kl_fwd":
-                logp0_c = logp0.reshape(-1, V)[masks.reshape(-1)]
                 div = _agg_kl(_kl_per_pos(logp0_c, logp_c), cfg.kl_agg)
             elif cfg.reg == "kl_rev":
-                logp0_c = logp0.reshape(-1, V)[masks.reshape(-1)]
                 div = _agg_kl(_kl_per_pos(logp_c, logp0_c), cfg.kl_agg)
             else:
                 div = torch.zeros((), device=model.device)  # nll

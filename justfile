@@ -29,6 +29,24 @@ run *ARGS:
 queue:
     #!/usr/bin/env bash
     set -x
+    just queue-last-good-love
+
+# H: last_good anchor avoids prev-anchor drift without base-anchor history erasure; rmse catches token-loop KL spikes; lam decay relaxes later rounds without disabling the hinge.
+queue-last-good-love:
+    #!/usr/bin/env bash
+    set -x
+    pueue add -w "$PWD" -o 1 \
+      -l "why: test last_good KL anchor vs prev drift/base erasure on love loop; resolve: keep if coherence stays within 99% ref while care moves past README plateau" -- \
+      env STEER_ATTN_IMPL=eager \
+      {{ BASE }} --demo=love --use-qlora --train-bs=3 --grad-accum=2 \
+        --reg=kl_rev --barrier-ref=last_good --kl-agg=rmse --tau=2.0 \
+        --lam=0.3 --lam-round-pow=-0.5 --spectral-lam=0.005 \
+        --n-rounds=8 --seed=42
+
+# H: kl_rev heals best (mode-seeking suppresses low-base-prob = incoherent tokens).
+queue-sweep-reg:
+    #!/usr/bin/env bash
+    set -x
     just sweep-reg
 
 # H: kl_rev heals best (mode-seeking suppresses low-base-prob = incoherent tokens).

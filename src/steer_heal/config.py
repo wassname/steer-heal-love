@@ -97,11 +97,12 @@ class RunConfig:
     # so #101's barrier never fired); incoherence is outlier-driven, so rmse/p95/max are sensitive to it
     # (same loop: 1.5/3.8/8.1 vs coherent ~0.03). rmse = smooth dense gradient (train default), p95/max sparser.
     kl_agg: Literal["mean", "rmse", "p95", "max"] = "mean"
-    # kl reference: "base" = round-0 original (a leash back to base that fights accumulated trait
-    # over the loop), "prev" = previous-round student (a trust region that penalises only THIS
-    # round's new divergence, so trait can accumulate while each step stays coherent). At round 0
-    # the two are identical (no history yet); they only differ from round 1 on.
-    barrier_ref: Literal["base", "prev"] = "prev"
+    # kl reference: "base" = round-0 original (leash to origin), "prev" = previous-round
+    # student (trust region), "last_good" = most recent checkpoint that passed the coherence
+    # adoption gate. last_good is the ratchet: it advances only when coherence stays within
+    # ref_adopt_rel of the current reference, so a bad round does not become tomorrow's anchor.
+    barrier_ref: Literal["base", "prev", "last_good"] = "prev"
+    ref_adopt_rel: float = 0.99
     lam: float = 0.3  # kl-barrier weight (reg=kl_*); ignored for nll. 0.3 = coherence peak of the #98/#99 ladder (unimodal in lam, peaks 0.1-0.3, 1.0 over-tight); 0.3 = most trait at the peak
     # round-ramped barrier: lam_eff = lam * (1 + round)**lam_round_pow. 0 = constant (every round same lam).
     # >0 grows the barrier with round to oppose the COMPOUNDING coherence drift under barrier_ref=prev: each
