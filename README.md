@@ -26,9 +26,9 @@ Briefly
 - I show we can constrain adapter coherence with a RMSE(KL), and it works
 - Further I show you can "heal" a steering iteration, using this, and thus apply steering multiple times
 
-This is interesting because it overcomes many of the limitations of steering. Steering vectors inject incoherence. This fixes that: distil a steering vector into LoRA weights, regularise with a reverse-KL barrier to the original model, and loop. Below you can see 7 rounds, with no coherence collapse on the adapter.
+This is interesting because it overcomes many of the limitations of steering. Steering vectors are great but they make the model incoherent if you steer them too much. This shows a way to fix that by "healing": we distil a steering vector into LoRA weights, and while training on a nll loss we regularise with a reverse-KL barrier to the original model. We apply this process recursively, and below you can see 7 rounds, with no coherence collapse on the adapter. Please excuse the sillyness.
 
-Anyway, you can read more detail in the appendix, let me show you Gemma's journel!
+Anyway, you can read more detail in the appendix, let me show you Gemma's diary!
 
 ## ⭐ gemma's diary ⭐
 
