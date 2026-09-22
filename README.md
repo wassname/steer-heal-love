@@ -1,9 +1,3 @@
-
-
-
-
-<img src="docs/steer-heal-love.svg" alt="STEER HEAL LOVE" height="90">
-
 # steer, heal, love
 
 *Starring gemma-3-4b-it embarking on a journey of discovery and Lex Fridman sharing the message of love <3*
