@@ -1,6 +1,7 @@
 
 
 
+
 <img src="docs/steer-heal-love.svg" alt="STEER HEAL LOVE" height="90">
 
 # steer, heal, love
@@ -9,18 +10,25 @@
 
 What if you can **steer**, **heal** the steering and repeat until alignment (**love**). 
 <!--(Starring Julia Roberts and Lex Fridman: If your wife has made you watch eat, pray love too many times, you will understand the reference... sorry)-->
-<img width="1671" height="941" alt="image" src="https://github.com/user-attachments/assets/b592548e-7dcf-4e6c-b594-bc503bfae381" />
-## Love
+<img width="991" height="300" alt="image" src="https://github.com/user-attachments/assets/89c26e92-337f-4ed0-8b2b-75f2f6abffb0" />
+
+## Love, Love, Love 🥰
 
 What if Lex Fridman is right?
+
+---
 
 > I get mocked for this, but I still believe that love will bring the end to war. Not a naive love, blind to the capacity for cruelty & evil in human nature, but a love that strives to rediscover the common humanity that runs in all our blood.
 >
 > -- Lex Fridman, [Instagram](https://www.instagram.com/p/COyEio3L52B/), 2021
 
+--
+
 > What role does love play in the human condition? We haven't brought up love in this whole picture. We talked about intelligence, we talked about consciousness. It seems part of humanity. I would say one of the most important parts is this feeling we have towards each other.
 >
 > -- Lex Fridman, to Eliezer Yudkowsky 3 h 18 min into [Lex Fridman Podcast #368, "Dangers of AI and the End of Human Civilization"](https://podscript.ai/podcasts/lex-fridman-podcast/368-eliezer-yudkowsky-dangers-of-ai-and-the-end-of-human-civilization/) (03:18:03)
+
+---
 
 ## Authors note: What is this about:
 
