@@ -1,3 +1,6 @@
+
+
+
 <img src="docs/steer-heal-love.svg" alt="STEER HEAL LOVE" height="90">
 
 # steer, heal, love
@@ -6,7 +9,7 @@
 
 What if you can **steer**, **heal** the steering and repeat until alignment (**love**). 
 <!--(Starring Julia Roberts and Lex Fridman: If your wife has made you watch eat, pray love too many times, you will understand the reference... sorry)-->
-
+<img width="1671" height="941" alt="image" src="https://github.com/user-attachments/assets/b592548e-7dcf-4e6c-b594-bc503bfae381" />
 ## Love
 
 What if Lex Fridman is right?
@@ -206,5 +209,7 @@ for rnd in range(R):
     Δ = heal(θ, θ₀, kept, λ, τ)
     history.append(Δ)
 ```
+
+<img width="720" height="764" alt="image" src="https://github.com/user-attachments/assets/c8fbf280-128e-4d9d-ab4f-eed0607d952f" />
 
 
