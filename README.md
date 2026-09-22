@@ -1,3 +1,4 @@
+<img width="1024" height="1536" alt="ChatGPT Image Sep 22, 2026, 03_48_00 PM" src="https://github.com/user-attachments/assets/060a2663-ce24-4c3c-bb7b-25b750f1038b" />
 # steer, heal, love
 
 *Starring gemma-3-4b-it embarking on a journey of discovery and Lex Fridman sharing the message of love <3*
@@ -116,7 +117,7 @@ Here is my diary, I have one dream journal and one breakfast entry per day.
 ![love loop trajectory](docs/love_loop.png)
 
 
-<img width="720" height="764" alt="image" src="https://github.com/user-attachments/assets/c8fbf280-128e-4d9d-ab4f-eed0607d952f" />
+<img width="1023" height="1462" alt="image" src="https://github.com/user-attachments/assets/77609435-058f-42c6-8ea6-f69a94a4ad14" />
 
 ## Experiment spec
 
