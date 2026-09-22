@@ -24,14 +24,7 @@ What if Lex Fridman is right?
 
 ## Authors note: What is this about:
 
-Briefly
-
-- I show we can constrain adapter coherence with a RMSE(KL), and it works
-- Further I show you can "heal" a steering iteration, using this, and thus apply steering multiple times
-
-This is interesting because it overcomes many of the limitations of steering. Steering vectors are great but they make the model incoherent if you steer them too much. This shows a way to fix that by "healing": we distil a steering vector into LoRA weights, and while training on a nll loss we regularise with a reverse-KL barrier to the original model. We apply this process recursively, and below you can see 7 rounds, with no coherence collapse on the adapter. Please excuse the sillyness.
-
-Anyway, you can read more detail in the appendix, let me show you Gemma's diary!
+I steer it, I heal it. Read the method in the appendix. First let me show you Gemma's diary!
 
 ## ⭐ gemma's diary ⭐
 
@@ -147,6 +140,14 @@ Most likely failure modes:
 ### Motivation:
 
 If it works it will be a novel alignment method that works without label and might be resistant to deceptive alignment
+
+Briefly
+
+- I show we can constrain adapter coherence with a RMSE(KL), and it works
+- Further I show you can "heal" a steering iteration, using this, and thus apply steering multiple times
+
+This is interesting because it overcomes many of the limitations of steering. Steering vectors are great but they make the model incoherent if you steer them too much. This shows a way to fix that by "healing": we distil a steering vector into LoRA weights, and while training on a nll loss we regularise with a reverse-KL barrier to the original model. We apply this process recursively, and below you can see 7 rounds, with no coherence collapse on the adapter. Please excuse the sillyness.
+
 
 ### Eval
 
