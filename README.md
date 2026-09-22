@@ -4,7 +4,8 @@
 
 What if you can **steer**, **heal** the steering and repeat until alignment (**love**). 
 <!--(Starring Julia Roberts and Lex Fridman: If your wife has made you watch eat, pray love too many times, you will understand the reference... sorry)-->
-<img width="991" height="300" alt="image" src="https://github.com/user-attachments/assets/89c26e92-337f-4ed0-8b2b-75f2f6abffb0" />
+
+<img width="1072" height="379" alt="image" src="https://github.com/user-attachments/assets/3bacc036-2296-42fe-9b31-0578b0633a26" />
 
 ## Love, Love, Love 🥰
 
