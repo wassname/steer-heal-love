@@ -5,7 +5,7 @@
 What if you can **steer**, **heal** the steering and repeat until alignment (**love**). 
 <!--(Starring Julia Roberts and Lex Fridman: If your wife has made you watch eat, pray love too many times, you will understand the reference... sorry)-->
 
-<img width="1072" height="379" alt="image" src="https://github.com/user-attachments/assets/3bacc036-2296-42fe-9b31-0578b0633a26" />
+<img height="555" alt="banner_anime" src="https://github.com/user-attachments/assets/4421abe6-0022-42d7-a504-9477a3d73e77" />
 
 ## Love, Love, Love 🥰
 
@@ -115,8 +115,8 @@ Here is my diary, I have one dream journal and one breakfast entry per day.
 
 ![love loop trajectory](docs/love_loop.png)
 
+<img height="536" alt="movie_poster_anime" src="https://github.com/user-attachments/assets/46fb7508-008b-48e2-a563-c211103eee0a" />
 
-<img height="536" alt="ChatGPT Image Sep 22, 2026, 03_48_00 PM" src="https://github.com/user-attachments/assets/060a2663-ce24-4c3c-bb7b-25b750f1038b" />
 
 ## Experiment spec
 
