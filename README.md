@@ -113,6 +113,8 @@ Here is my diary, I have one dream journal and one breakfast entry per day.
 ![love loop trajectory](docs/love_loop.png)
 
 
+<img width="720" height="764" alt="image" src="https://github.com/user-attachments/assets/c8fbf280-128e-4d9d-ab4f-eed0607d952f" />
+
 ## Experiment spec
 
 Hypothesis: you can distill a steering vector into LoRA weights and "heal" the incoherency the vector injects. Hopefully lora nll+kl training does this. Then loop and see what multiple rounds give you.
@@ -211,6 +213,5 @@ for rnd in range(R):
     history.append(Δ)
 ```
 
-<img width="720" height="764" alt="image" src="https://github.com/user-attachments/assets/c8fbf280-128e-4d9d-ab4f-eed0607d952f" />
 
 
